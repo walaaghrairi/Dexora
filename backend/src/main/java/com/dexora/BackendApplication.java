@@ -1,4 +1,4 @@
-package com.dexora.backend;
+package com.dexora;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
