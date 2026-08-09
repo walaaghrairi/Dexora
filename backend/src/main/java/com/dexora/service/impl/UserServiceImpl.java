@@ -1,6 +1,7 @@
 package com.dexora.service.impl;
 
 import com.dexora.dto.UserDTO;
+import com.dexora.dto.UserResponseDTO;
 import com.dexora.entity.User;
 import com.dexora.exception.ResourceNotFoundException;
 import com.dexora.mapper.UserMapper;
@@ -20,32 +21,33 @@ public class UserServiceImpl implements UserService {
 
     private final UserRepository userRepository;
 
+
     @Override
-    public UserDTO create(UserDTO userDTO) {
+    public UserResponseDTO create(UserDTO userDTO) {
         User user = UserMapper.toEntity(userDTO);
-        return UserMapper.toDTO(userRepository.save(user));
+        return UserMapper.toResponseDTO(userRepository.save(user));
     }
 
     @Override
-    public UserDTO update(UserDTO userDTO) {
+    public UserResponseDTO update(UserDTO userDTO) {
         if (!userRepository.existsById(userDTO.getId())) {
             throw new ResourceNotFoundException("User not found");
         }
         User user = UserMapper.toEntity(userDTO);
-        return UserMapper.toDTO(userRepository.save(user));
+        return UserMapper.toResponseDTO(userRepository.save(user));
     }
 
     @Override
-    public UserDTO findById(Long id) {
+    public UserResponseDTO findById(Long id) {
         return userRepository.findById(id)
-                .map(UserMapper::toDTO)
+                .map(UserMapper::toResponseDTO)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
     }
 
     @Override
-    public List<UserDTO> findAll() {
+    public List<UserResponseDTO> findAll() {
         return userRepository.findAll().stream()
-                .map(UserMapper::toDTO)
+                .map(UserMapper::toResponseDTO)
                 .collect(Collectors.toList());
     }
 
@@ -55,5 +57,9 @@ public class UserServiceImpl implements UserService {
             throw new ResourceNotFoundException("User not found");
         }
         userRepository.deleteById(id);
+    }
+    @Override
+    public boolean existsByEmail(String email) {
+        return userRepository.existsByEmail(email);
     }
 }

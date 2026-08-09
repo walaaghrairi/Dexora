@@ -1,12 +1,14 @@
 package com.dexora.service;
 
 import com.dexora.dto.UserDTO;
+import com.dexora.dto.UserResponseDTO;
 import java.util.List;
 
 public interface UserService {
-    UserDTO create(UserDTO userDTO);
-    UserDTO update(UserDTO userDTO);
-    UserDTO findById(Long id);
-    List<UserDTO> findAll();
+    UserResponseDTO create(UserDTO userDTO);
+    UserResponseDTO update(UserDTO userDTO);
+    UserResponseDTO findById(Long id);
+    List<UserResponseDTO> findAll();
     void delete(Long id);
+    boolean existsByEmail(String email);
 }

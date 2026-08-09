@@ -1,6 +1,7 @@
 package com.dexora.mapper;
 
 import com.dexora.dto.UserDTO;
+import com.dexora.dto.UserResponseDTO;
 import com.dexora.entity.User;
 
 public class UserMapper {
@@ -20,6 +21,20 @@ public class UserMapper {
                 .build();
     }
 
+    public static UserResponseDTO toResponseDTO(User entity) {
+        if (entity == null) {
+            return null;
+        }
+        return UserResponseDTO.builder()
+                .id(entity.getId())
+                .firstName(entity.getFirstName())
+                .lastName(entity.getLastName())
+                .email(entity.getEmail())
+                .role(entity.getRole())
+                .createdAt(entity.getCreatedAt())
+                .build();
+    }
+
     public static User toEntity(UserDTO dto) {
         if (dto == null) {
             return null;
@@ -31,7 +46,6 @@ public class UserMapper {
         entity.setEmail(dto.getEmail());
         entity.setHashPassword(dto.getHashPassword());
         entity.setRole(dto.getRole());
-        entity.setCreatedAt(dto.getCreatedAt());
         return entity;
     }
 }
