@@ -17,6 +17,7 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.LocalDateTime;
 
@@ -49,6 +50,7 @@ public class Sign {
     @Column(nullable = false, unique = true)
     private String modelLabel;
 
+    @CreationTimestamp
     @NotNull
     @Column(nullable = false)
     private LocalDateTime createdAt;

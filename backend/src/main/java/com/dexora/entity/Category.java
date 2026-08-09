@@ -12,6 +12,7 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.LocalDateTime;
 
@@ -33,6 +34,7 @@ public class Category {
 
     private String description;
 
+    @CreationTimestamp
     @NotNull
     @Column(nullable = false)
     private LocalDateTime createdAt;
