@@ -31,6 +31,9 @@ public class UserDTO {
     @NotBlank
     private String email;
 
+    @NotBlank
+    private String hashPassword;
+
     @NotNull
     private Role role;
 
