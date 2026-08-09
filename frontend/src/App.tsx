@@ -3,7 +3,7 @@ import type { FormEvent } from 'react'
 import { api } from './services/api'
 import type { Account, Category, Course, Sign, TwoFactorSetup } from './types/api'
 
-type Page = 'home' | 'catalogue' | 'dashboard' | 'auth' | 'practice' | 'twoFactor'
+type Page = 'home' | 'catalogue' | 'dashboard' | 'settings' | 'auth' | 'practice' | 'twoFactor'
 
 const demoCategories: Category[] = [
   { id: 1, name: 'Salutations', description: 'Les expressions essentielles pour commencer une conversation.' },
@@ -253,23 +253,30 @@ function App() {
 
       {page === 'dashboard' && (
         <main className="content-page">
-          <p className="eyebrow">MON ESPACE</p>
-          <h1>{isAuthenticated ? 'Votre progression' : 'Suivez votre progression'}</h1>
-          <p className="page-intro">{isAuthenticated ? 'Reprenez votre apprentissage là où vous vous êtes arrêté(e).' : 'Connectez-vous pour enregistrer vos résultats et obtenir des recommandations.'}</p>
+          <section className="profile-hero">
+            <div className="profile-avatar">{account ? `${account.firstName.slice(0, 1)}${account.lastName.slice(0, 1)}` : 'TS'}</div>
+            <div className="profile-summary"><p className="eyebrow">MON ESPACE</p><h1>{account ? `${account.firstName} ${account.lastName}` : 'Votre progression'}</h1><p>{account?.email || 'Connectez-vous pour enregistrer vos résultats et obtenir des recommandations.'}</p><div className="profile-tags"><span>🔥 Série de 0 jour</span><span>⚡ 0 XP</span><span>🛡️ Compte sécurisé</span></div></div>
+            {isAuthenticated && <button className="settings-button" onClick={() => navigate('settings')}>⚙️ Paramètres du compte</button>}
+          </section>
           <section className="stats-grid">
             <article><strong>0</strong><span>Leçons terminées</span></article>
             <article><strong>0 %</strong><span>Précision moyenne</span></article>
             <article><strong>0</strong><span>Badges obtenus</span></article>
           </section>
           <article className="recommendation"><span>✦</span><div><h2>Recommandation</h2><p>Commencez par la catégorie « Salutations » et entraînez-vous régulièrement.</p></div><button className="primary-button compact" onClick={() => navigate('catalogue')}>Voir les leçons</button></article>
-          {isAuthenticated && account && <section className="account-section">
-            <div className="section-heading"><div><p className="eyebrow">PARAMÈTRES DU COMPTE</p><h2>Mon profil et ma sécurité</h2></div><div className="account-avatar">{account.firstName.slice(0, 1)}{account.lastName.slice(0, 1)}</div></div>
-            <div className="account-grid">
+        </main>
+      )}
+
+      {page === 'settings' && (
+        <main className="content-page settings-page">
+          <button className="back-button" onClick={() => navigate('dashboard')}>← Retour à mon espace</button>
+          <div className="section-heading"><div><p className="eyebrow">PARAMÈTRES DU COMPTE</p><h2>Mon profil et ma sécurité</h2></div>{account && <div className="account-avatar">{account.firstName.slice(0, 1)}{account.lastName.slice(0, 1)}</div>}</div>
+          {account ? <div className="account-grid">
               <form className="account-card" onSubmit={updateProfile}><h3>Informations personnelles</h3><p>Modifiez vos informations de connexion.</p><div className="form-row"><label>Prénom<input name="firstName" defaultValue={account.firstName} required /></label><label>Nom<input name="lastName" defaultValue={account.lastName} required /></label></div><label>E-mail<input name="email" type="email" defaultValue={account.email} required /></label><button className="primary-button compact" type="submit">Enregistrer</button></form>
               <form className="account-card" onSubmit={updatePassword}><h3>Mot de passe</h3><p>Choisissez un mot de passe robuste.</p><label>Mot de passe actuel<input name="currentPassword" type="password" required /></label><label>Nouveau mot de passe<input name="newPassword" type="password" minLength={8} required /></label><button className="primary-button compact" type="submit">Modifier le mot de passe</button></form>
               <article className="account-card two-factor-card"><div className="two-factor-title"><span>🔐</span><div><h3>Google Authenticator</h3><p>{account.twoFactorEnabled ? '2FA activée : votre compte est protégé.' : 'Ajoutez une seconde protection à votre compte.'}</p></div></div>{!account.twoFactorEnabled && !twoFactorSetup && <button className="primary-button compact" onClick={setupTwoFactor}>Configurer la 2FA</button>}{twoFactorSetup && <form className="two-factor-setup" onSubmit={enableTwoFactor}><p>Dans Google Authenticator, ajoutez une clé de configuration manuelle :</p><code>{twoFactorSetup.secret}</code><small>Compte : {account.email} · Type : Basé sur l’heure</small><label>Code à six chiffres<input name="code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} placeholder="123456" required /></label><button className="primary-button compact" type="submit">Vérifier et activer</button></form>}</article>
             </div>
-          </section>}
+          : <p>Chargement de votre profil…</p>}
         </main>
       )}
 
