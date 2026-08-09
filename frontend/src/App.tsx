@@ -3,7 +3,7 @@ import type { FormEvent } from 'react'
 import { api } from './services/api'
 import type { Account, Category, Course, Sign, TwoFactorSetup } from './types/api'
 
-type Page = 'home' | 'catalogue' | 'dashboard' | 'auth' | 'practice'
+type Page = 'home' | 'catalogue' | 'dashboard' | 'auth' | 'practice' | 'twoFactor'
 
 const demoCategories: Category[] = [
   { id: 1, name: 'Salutations', description: 'Les expressions essentielles pour commencer une conversation.' },
@@ -31,6 +31,7 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(localStorage.getItem('tunisign_token')))
   const [account, setAccount] = useState<Account | null>(null)
   const [twoFactorSetup, setTwoFactorSetup] = useState<TwoFactorSetup | null>(null)
+  const [pendingTwoFactorEmail, setPendingTwoFactorEmail] = useState('')
 
   useEffect(() => {
     Promise.allSettled([api.categories(), api.courses(), api.signs()])
@@ -87,7 +88,14 @@ function App() {
     try {
       const response = isRegistering
         ? await api.register(String(data.get('firstName')), String(data.get('lastName')), email, password)
-        : await api.login(email, password, String(data.get('twoFactorCode') || ''))
+        : await api.login(email, password)
+      if (response.twoFactorRequired && response.email) {
+        setPendingTwoFactorEmail(response.email)
+        navigate('twoFactor')
+        setNotice('Votre compte est protégé par Google Authenticator.')
+        return
+      }
+      if (!response.token) throw new Error('Connexion impossible.')
       localStorage.setItem('tunisign_token', response.token)
       setIsAuthenticated(true)
       navigate('dashboard')
@@ -102,6 +110,17 @@ function App() {
     setIsAuthenticated(false)
     navigate('home')
     setNotice('Vous êtes déconnecté(e).')
+  }
+
+  async function verifyTwoFactor(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const code = String(new FormData(event.currentTarget).get('code'))
+    try {
+      const response = await api.verifyTwoFactor(pendingTwoFactorEmail, code)
+      if (!response.token) throw new Error('Code invalide.')
+      localStorage.setItem('tunisign_token', response.token)
+      setIsAuthenticated(true); navigate('dashboard'); setNotice('Connexion sécurisée réussie.')
+    } catch { setNotice('Le code Google Authenticator est incorrect ou expiré.') }
   }
 
   async function updateProfile(event: FormEvent<HTMLFormElement>) {
@@ -263,10 +282,25 @@ function App() {
               {isRegistering && <div className="form-row"><label>Prénom<input required name="firstName" /></label><label>Nom<input required name="lastName" /></label></div>}
               <label>E-mail<input required type="email" name="email" placeholder="nom@exemple.com" /></label>
               <label>Mot de passe<input required minLength={6} type="password" name="password" placeholder="Minimum 6 caractères" /></label>
-              {!isRegistering && <label>Code Google Authenticator <span className="optional-label">(si la 2FA est activée)</span><input inputMode="numeric" name="twoFactorCode" maxLength={6} placeholder="123456" /></label>}
               <button className="primary-button" type="submit">{isRegistering ? 'Créer mon compte' : 'Connexion'}</button>
             </form>
             <button className="text-button" onClick={() => setIsRegistering(!isRegistering)}>{isRegistering ? 'J’ai déjà un compte' : 'Créer un compte'}</button>
+          </section>
+        </main>
+      )}
+
+      {page === 'twoFactor' && (
+        <main className="auth-page">
+          <section className="auth-card two-factor-login">
+            <div className="security-icon">🔐</div>
+            <p className="eyebrow">VÉRIFICATION DE SÉCURITÉ</p>
+            <h1>Confirme ton identité</h1>
+            <p>Ouvre Google Authenticator et saisis le code temporaire à six chiffres pour <strong>{pendingTwoFactorEmail}</strong>.</p>
+            <form onSubmit={verifyTwoFactor}>
+              <label>Code Google Authenticator<input name="code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} placeholder="123456" autoFocus required /></label>
+              <button className="primary-button" type="submit">Vérifier le code</button>
+            </form>
+            <button className="text-button" onClick={() => navigate('auth')}>← Retour à la connexion</button>
           </section>
         </main>
       )}

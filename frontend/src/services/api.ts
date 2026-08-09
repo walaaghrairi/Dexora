@@ -28,8 +28,10 @@ export const api = {
   categories: () => request<Category[]>('/categories'),
   courses: () => request<Course[]>('/courses'),
   signs: () => request<Sign[]>('/signs'),
-  login: (email: string, password: string, twoFactorCode?: string) =>
-    request<AuthResponse>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password, twoFactorCode }) }),
+  login: (email: string, password: string) =>
+    request<AuthResponse>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  verifyTwoFactor: (email: string, code: string) =>
+    request<AuthResponse>('/auth/2fa/verify', { method: 'POST', body: JSON.stringify({ email, code }) }),
   register: (firstName: string, lastName: string, email: string, password: string) =>
     request<AuthResponse>('/auth/register', {
       method: 'POST',

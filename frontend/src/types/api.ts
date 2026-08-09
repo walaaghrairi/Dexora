@@ -23,7 +23,7 @@ export type Sign = {
   courseId?: number
 }
 
-export type AuthResponse = { token: string }
+export type AuthResponse = { token?: string; twoFactorRequired?: boolean; email?: string }
 
 export type Account = {
   id: number

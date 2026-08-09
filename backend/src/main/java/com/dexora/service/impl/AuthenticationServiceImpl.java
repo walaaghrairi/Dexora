@@ -5,6 +5,7 @@ import com.dexora.dto.LoginRequest;
 import com.dexora.dto.RegisterRequest;
 import com.dexora.dto.UserDTO;
 import com.dexora.dto.UserResponseDTO;
+import com.dexora.dto.TwoFactorLoginRequest;
 import com.dexora.enums.Role;
 import com.dexora.entity.User;
 import com.dexora.repository.UserRepository;
@@ -65,11 +66,22 @@ public class AuthenticationServiceImpl implements AuthenticationService {
         );
         User user = userRepository.findByEmail(request.getEmail())
                 .orElseThrow(() -> new BadCredentialsException("Bad credentials"));
-        if (user.isTwoFactorEnabled() && !totpService.isValid(user.getTwoFactorSecret(), request.getTwoFactorCode())) {
-            throw new BadCredentialsException("Invalid two-factor authentication code");
+        if (user.isTwoFactorEnabled()) {
+            return AuthenticationResponse.builder().twoFactorRequired(true).email(user.getEmail()).build();
         }
         UserDetails userDetails = userDetailsService.loadUserByUsername(request.getEmail());
         String jwt = jwtService.generateToken(userDetails);
         return AuthenticationResponse.builder().token(jwt).build();
+    }
+
+    @Override
+    public AuthenticationResponse verifyTwoFactor(TwoFactorLoginRequest request) {
+        User user = userRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> new BadCredentialsException("Bad credentials"));
+        if (!user.isTwoFactorEnabled() || !totpService.isValid(user.getTwoFactorSecret(), request.getCode())) {
+            throw new BadCredentialsException("Invalid two-factor authentication code");
+        }
+        UserDetails userDetails = userDetailsService.loadUserByUsername(user.getEmail());
+        return AuthenticationResponse.builder().token(jwtService.generateToken(userDetails)).build();
     }
 }
