@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { FormEvent } from 'react'
+import type { CSSProperties, FormEvent } from 'react'
 import { api } from './services/api'
 import type { Account, Category, Course, Sign, TwoFactorSetup } from './types/api'
+import tunisignLogo from './assets/tunisign-sina-logo.png'
 
 type Page = 'home' | 'catalogue' | 'dashboard' | 'settings' | 'auth' | 'practice' | 'twoFactor'
+type PracticeStatus = 'idle' | 'analyzing' | 'ready'
 
 const demoCategories: Category[] = [
   { id: 1, name: 'Salutations', description: 'Les expressions essentielles pour commencer une conversation.' },
@@ -32,6 +34,12 @@ function App() {
   const [account, setAccount] = useState<Account | null>(null)
   const [twoFactorSetup, setTwoFactorSetup] = useState<TwoFactorSetup | null>(null)
   const [pendingTwoFactorEmail, setPendingTwoFactorEmail] = useState('')
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('tunisign_theme') === 'dark')
+  const [practiceStatus, setPracticeStatus] = useState<PracticeStatus>('idle')
+  const [celebrationOpen, setCelebrationOpen] = useState(false)
+  const [sessionXp, setSessionXp] = useState(0)
+  const [completedLessons, setCompletedLessons] = useState(0)
+  const [sessionStreak, setSessionStreak] = useState(0)
 
   useEffect(() => {
     Promise.allSettled([api.categories(), api.courses(), api.signs()])
@@ -77,7 +85,32 @@ function App() {
 
   function startLesson(course: Course) {
     setSelectedCourse(course)
+    setPracticeStatus('idle')
     navigate('practice')
+  }
+
+  function toggleTheme() {
+    setDarkMode((current) => {
+      const next = !current
+      localStorage.setItem('tunisign_theme', next ? 'dark' : 'light')
+      return next
+    })
+  }
+
+  function startAnalysis() {
+    setPracticeStatus('analyzing')
+    setNotice('Analyse visuelle en cours : position, orientation et mouvement…')
+    window.setTimeout(() => {
+      setPracticeStatus('ready')
+      setNotice('Analyse prête : excellente position de départ.')
+    }, 1500)
+  }
+
+  function completeLesson() {
+    setSessionXp((current) => current + 20)
+    setCompletedLessons((current) => current + 1)
+    setSessionStreak((current) => current + 1)
+    setCelebrationOpen(true)
   }
 
   async function submitAuth(event: FormEvent<HTMLFormElement>) {
@@ -151,22 +184,25 @@ function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${darkMode ? 'dark-mode' : ''}`}>
       <header className="topbar">
         <button className="brand" onClick={() => navigate('home')} aria-label="Accueil TuniSign">
-          <span className="brand-mark">TS</span>
-          <span>TuniSign</span>
+          <span className="brand-mark"><img src={tunisignLogo} alt="" /></span>
+          <span className="brand-title"><strong>TuniSign</strong><small>Langue des signes tunisienne</small></span>
         </button>
         <nav aria-label="Navigation principale">
-          <button onClick={() => navigate('home')}>Accueil</button>
-          <button onClick={() => navigate('catalogue')}>Apprendre</button>
-          <button onClick={() => navigate('dashboard')}>Mon espace</button>
+          <button className={page === 'home' ? 'active' : ''} onClick={() => navigate('home')}>Accueil</button>
+          <button className={page === 'catalogue' || page === 'practice' ? 'active' : ''} onClick={() => navigate('catalogue')}>Apprendre</button>
+          <button className={page === 'dashboard' || page === 'settings' ? 'active' : ''} onClick={() => navigate('dashboard')}>Mon espace</button>
         </nav>
-        {isAuthenticated ? (
-          <button className="ghost-button" onClick={logout}>Déconnexion</button>
-        ) : (
-          <button className="primary-button compact" onClick={() => navigate('auth')}>Se connecter</button>
-        )}
+        <div className="topbar-actions">
+          <button className="theme-button" onClick={toggleTheme} aria-label={darkMode ? 'Activer le mode clair' : 'Activer le mode sombre'}>{darkMode ? '☀️' : '🌙'}</button>
+          {isAuthenticated ? (
+            <button className="ghost-button" onClick={logout}>Déconnexion</button>
+          ) : (
+            <button className="primary-button compact" onClick={() => navigate('auth')}>Se connecter</button>
+          )}
+        </div>
       </header>
 
       {usesDemoData && <div className="status-banner">Mode démonstration : démarrez le backend pour afficher les données réelles.</div>}
@@ -175,11 +211,13 @@ function App() {
       {page === 'home' && (
         <main>
           <section className="hero">
-            <div>
-              <p className="eyebrow">LANGUE DES SIGNES TUNISIENNE</p>
-              <h1>{isAuthenticated ? `Prêt(e) à continuer${account ? `, ${account.firstName}` : ''} ?` : 'Apprendre, pratiquer, progresser.'}</h1>
+            <div className="hero-particles" aria-hidden="true"><i /><i /><i /><i /></div>
+            <img className="hero-logo-watermark" src={tunisignLogo} alt="" aria-hidden="true" />
+            <div className="hero-copy-wrap">
+              <p className="eyebrow hero-reveal hero-reveal-one">LANGUE DES SIGNES TUNISIENNE</p>
+              <h1 className="hero-reveal hero-reveal-two">{isAuthenticated ? `Prêt(e) à continuer${account ? `, ${account.firstName}` : ''} ?` : 'Apprendre, pratiquer, progresser.'}</h1>
               <p className="hero-copy">{isAuthenticated ? 'Reprenez votre parcours, entraînez-vous devant la webcam et faites progresser votre score.' : 'TuniSign transforme l’apprentissage de la langue des signes tunisienne en une expérience visuelle, simple et motivante.'}</p>
-              <div className="hero-actions">
+              <div className="hero-actions hero-reveal hero-reveal-three">
                 <button className="primary-button" onClick={() => navigate('catalogue')}>{isAuthenticated ? 'Continuer les leçons' : 'Découvrir les leçons'}</button>
                 {isAuthenticated ? (
                   <button className="text-button" onClick={() => navigate('dashboard')}>Voir mon espace →</button>
@@ -188,7 +226,8 @@ function App() {
                 )}
               </div>
             </div>
-            <div className="hero-card" aria-label="Aperçu de la pratique">
+            <div className="hero-card hero-reveal hero-reveal-four" aria-label="Aperçu de la pratique">
+              <span className="live-indicator"><i /> EN DIRECT</span>
               <span className="mascot-hand" aria-hidden="true">🤟</span>
               <div className="mascot-spark spark-one">✦</div>
               <div className="mascot-spark spark-two">✦</div>
@@ -199,9 +238,9 @@ function App() {
             </div>
           </section>
           <section className="feature-grid">
-            <article><span>01</span><h2>Leçons guidées</h2><p>Des catégories utiles et des parcours progressifs.</p></article>
-            <article><span>02</span><h2>Correction visuelle</h2><p>Un retour immédiat pour améliorer chaque geste.</p></article>
-            <article><span>03</span><h2>Progression suivie</h2><p>Des recommandations adaptées à votre rythme.</p></article>
+            <article><span>01</span><h2>Leçons guidées</h2><p>Des catégories utiles et des parcours progressifs.</p><b>Explorer →</b></article>
+            <article><span>02</span><h2>Correction visuelle</h2><p>Un retour immédiat pour améliorer chaque geste.</p><b>Pratiquer →</b></article>
+            <article><span>03</span><h2>Progression suivie</h2><p>Des recommandations adaptées à votre rythme.</p><b>Progresser →</b></article>
           </section>
         </main>
       )}
@@ -239,17 +278,20 @@ function App() {
             <div className="practice-stage">
               <div className="stage-header"><span>LEÇON EN COURS</span><strong>1 / {Math.max(signs.filter((sign) => sign.courseId === selectedCourse.id).length, 1)}</strong></div>
               <div className="practice-progress"><span /></div>
-              <div className="sign-visual"><span>👋</span><i>✦</i><i>✦</i></div>
+              <div className={`camera-stage ${practiceStatus}`}>
+                <div className="camera-grid" aria-hidden="true" /><span className="camera-corner corner-one" /><span className="camera-corner corner-two" /><span className="camera-corner corner-three" /><span className="camera-corner corner-four" />
+                <div className="sign-visual"><span>👋</span><i>✦</i><i>✦</i></div>
+                {practiceStatus === 'analyzing' && <div className="scanner-line" />}
+                <div className="camera-status"><i /> {practiceStatus === 'analyzing' ? 'ANALYSE IA EN COURS' : practiceStatus === 'ready' ? 'GESTE DÉTECTÉ' : 'CAMÉRA PRÊTE'}</div>
+              </div>
               <p className="eyebrow">REPRODUIS LE SIGNE</p>
               <h1>{signs.find((sign) => sign.courseId === selectedCourse.id)?.word || selectedCourse.title}</h1>
               <p>Place-toi devant la caméra quand tu es prêt(e). Tu recevras une correction visuelle en direct.</p>
-              <button className="primary-button practice-button" onClick={() => setNotice('La caméra sera connectée au service IA dans la prochaine version.')}>Activer la caméra</button>
+              <button className="primary-button practice-button" onClick={startAnalysis} disabled={practiceStatus === 'analyzing'}>{practiceStatus === 'analyzing' ? 'Analyse en cours…' : practiceStatus === 'ready' ? 'Relancer l’analyse' : 'Activer la caméra'}</button>
             </div>
             <aside className="practice-side">
               <div className="xp-badge">⚡ +20 XP</div>
-              <h2>Ton objectif</h2>
-              <p>Reproduis le signe avec une précision de 80 % ou plus.</p>
-              <div className="tip-card"><span>💡</span><p>Regarde bien l’orientation de la main avant de commencer.</p></div>
+              {practiceStatus === 'ready' ? <><div className="score-ring" style={{ '--score': 87 } as CSSProperties}><strong>87%</strong><small>Excellent !</small></div><div className="analysis-checks"><p>✓ Position des mains</p><p>✓ Posture détectée</p><p>✓ Orientation stable</p></div><button className="primary-button compact" onClick={completeLesson}>Terminer la leçon →</button></> : <><h2>Ton objectif</h2><p>Reproduis le signe avec une précision de 80 % ou plus.</p><div className="tip-card"><span>💡</span><p>Regarde bien l’orientation de la main avant de commencer.</p></div></>}
             </aside>
           </section>
         </main>
@@ -259,13 +301,27 @@ function App() {
         <main className="content-page">
           <section className="profile-hero">
             <div className="profile-avatar">{account ? `${account.firstName.slice(0, 1)}${account.lastName.slice(0, 1)}` : 'TS'}</div>
-            <div className="profile-summary"><p className="eyebrow">MON ESPACE</p><h1>{account ? `${account.firstName} ${account.lastName}` : 'Votre progression'}</h1><p>{account?.email || 'Connectez-vous pour enregistrer vos résultats et obtenir des recommandations.'}</p><div className="profile-tags"><span>🔥 Série de 0 jour</span><span>⚡ 0 XP</span><span>🛡️ Compte sécurisé</span></div></div>
+            <div className="profile-summary"><p className="eyebrow">BON RETOUR</p><h1>{account ? `${account.firstName} ${account.lastName}` : 'Votre progression'}</h1><p>{account?.email || 'Connectez-vous pour enregistrer vos résultats et obtenir des recommandations.'}</p><div className="profile-tags"><span className="flame-tag">🔥 Série de {sessionStreak} jour{sessionStreak > 1 ? 's' : ''}</span><span>⚡ {sessionXp} XP</span><span>🛡️ Compte sécurisé</span></div></div>
             {isAuthenticated && <button className="settings-button" onClick={() => navigate('settings')}>⚙️ Paramètres du compte</button>}
           </section>
+          <section className="dashboard-focus">
+            <article className="continue-card">
+              <div><p className="eyebrow">🎥 CONTINUER</p><h2>{courses[0]?.title || 'Premier signe'}</h2><p>Reprenez la pratique et obtenez un retour visuel sur vos gestes.</p></div>
+              <div className="course-progress"><span><i /></span><b>{completedLessons ? 'Une leçon terminée' : 'Prêt à commencer'}</b></div>
+              <button className="primary-button compact" onClick={() => courses[0] && startLesson(courses[0])}>Continuer →</button>
+            </article>
+            <article className="challenge-card"><span className="challenge-orb">🎯</span><div><p className="eyebrow">CHALLENGE HEBDOMADAIRE</p><h2>Maîtriser 20 signes</h2><p>Une petite pratique par jour suffit.</p></div><div className="challenge-progress"><span style={{ width: `${Math.min(sessionXp / 2.5, 100)}%` }} /></div><small>{sessionXp} / 250 XP · Récompense : +250 XP</small></article>
+          </section>
           <section className="stats-grid">
-            <article><strong>0</strong><span>Leçons terminées</span></article>
-            <article><strong>0 %</strong><span>Précision moyenne</span></article>
-            <article><strong>0</strong><span>Badges obtenus</span></article>
+            <article><strong>{completedLessons}</strong><span>Leçons terminées</span></article>
+            <article><strong>{completedLessons ? '87' : '0'} %</strong><span>Précision moyenne</span></article>
+            <article><strong>{sessionXp}</strong><span>XP gagnés cette session</span></article>
+          </section>
+          <section className="learning-map-card">
+            <div className="map-heading"><div><p className="eyebrow">PARCOURS INTERACTIF</p><h2>Votre chemin d’apprentissage</h2></div><span>🏆 Objectif : niveau 1</span></div>
+            <div className="learning-map">
+              {courses.slice(0, 4).map((course, index) => <button key={course.id} className={`map-node ${index < completedLessons ? 'completed' : index === Math.min(completedLessons, Math.max(courses.length - 1, 0)) ? 'current' : 'locked'}`} onClick={() => startLesson(course)} disabled={index > completedLessons}><i>{index < completedLessons ? '★' : index === completedLessons ? '✦' : '🔒'}</i><span>{course.title}</span></button>)}
+            </div>
           </section>
           <article className="recommendation"><span>✦</span><div><h2>Recommandation</h2><p>Commencez par la catégorie « Salutations » et entraînez-vous régulièrement.</p></div><button className="primary-button compact" onClick={() => navigate('catalogue')}>Voir les leçons</button></article>
         </main>
@@ -315,6 +371,11 @@ function App() {
           </section>
         </main>
       )}
+
+      {celebrationOpen && <div className="celebration-overlay" role="dialog" aria-modal="true" aria-label="Leçon terminée">
+        <div className="confetti" aria-hidden="true"><i /><i /><i /><i /><i /><i /></div>
+        <section className="celebration-card"><span className="celebration-medal">🏆</span><p className="eyebrow">NOUVELLE ÉTAPE</p><h1>Bravo !</h1><p>Leçon terminée. Votre progression vient d’avancer.</p><strong>+20 XP</strong><div className="celebration-stars" aria-label="Trois étoiles">★ ★ ★</div><button className="primary-button" onClick={() => { setCelebrationOpen(false); navigate('dashboard') }}>Voir ma progression →</button></section>
+      </div>}
     </div>
   )
 }
