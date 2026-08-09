@@ -3,7 +3,7 @@ import type { FormEvent } from 'react'
 import { api } from './services/api'
 import type { Category, Course, Sign } from './types/api'
 
-type Page = 'home' | 'catalogue' | 'dashboard' | 'auth'
+type Page = 'home' | 'catalogue' | 'dashboard' | 'auth' | 'practice'
 
 const demoCategories: Category[] = [
   { id: 1, name: 'Salutations', description: 'Les expressions essentielles pour commencer une conversation.' },
@@ -26,6 +26,7 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [notice, setNotice] = useState('')
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null)
+  const [selectedCourse, setSelectedCourse] = useState<Course | null>(null)
   const [isRegistering, setIsRegistering] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(localStorage.getItem('tunisign_token')))
 
@@ -64,6 +65,11 @@ function App() {
     setNotice('')
     setPage(nextPage)
     window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  function startLesson(course: Course) {
+    setSelectedCourse(course)
+    navigate('practice')
   }
 
   async function submitAuth(event: FormEvent<HTMLFormElement>) {
@@ -126,10 +132,13 @@ function App() {
               </div>
             </div>
             <div className="hero-card" aria-label="Aperçu de la pratique">
-              <span className="camera-icon">⌁</span>
+              <span className="mascot-hand" aria-hidden="true">🤟</span>
+              <div className="mascot-spark spark-one">✦</div>
+              <div className="mascot-spark spark-two">✦</div>
               <p>Pratique devant la webcam</p>
               <strong>87 %</strong>
               <small>Score de précision</small>
+              <div className="streak-pill">🔥 Série de 4 jours</div>
             </div>
           </section>
           <section className="feature-grid">
@@ -153,15 +162,39 @@ function App() {
             <section className="course-grid">
               {displayedCourses.map((course) => (
                 <article className="course-card" key={course.id}>
-                  <div className="course-number">{String(course.id).padStart(2, '0')}</div>
+                  <div className="course-card-top"><div className="course-number">{String(course.id).padStart(2, '0')}</div><span className="course-xp">+20 XP</span></div>
+                  <div className="lesson-orb" aria-hidden="true">🤟</div>
                   <h2>{course.title}</h2>
                   <p>{course.description || 'Une leçon pour progresser à votre rythme.'}</p>
-                  <span>{signs.filter((sign) => sign.courseId === course.id).length || '—'} signes</span>
-                  <button className="text-button" onClick={() => setNotice('La page de pratique webcam sera ajoutée dans la prochaine étape.')}>Commencer →</button>
+                  <div className="lesson-meta"><span>{signs.filter((sign) => sign.courseId === course.id).length || '—'} signes</span><span className="difficulty-dot">Débutant</span></div>
+                  <button className="lesson-start" onClick={() => startLesson(course)}>Commencer <span>→</span></button>
                 </article>
               ))}
             </section>
           )}
+        </main>
+      )}
+
+      {page === 'practice' && selectedCourse && (
+        <main className="practice-page">
+          <button className="back-button" onClick={() => navigate('catalogue')}>← Retour aux leçons</button>
+          <section className="practice-layout">
+            <div className="practice-stage">
+              <div className="stage-header"><span>LEÇON EN COURS</span><strong>1 / {Math.max(signs.filter((sign) => sign.courseId === selectedCourse.id).length, 1)}</strong></div>
+              <div className="practice-progress"><span /></div>
+              <div className="sign-visual"><span>👋</span><i>✦</i><i>✦</i></div>
+              <p className="eyebrow">REPRODUIS LE SIGNE</p>
+              <h1>{signs.find((sign) => sign.courseId === selectedCourse.id)?.word || selectedCourse.title}</h1>
+              <p>Place-toi devant la caméra quand tu es prêt(e). Tu recevras une correction visuelle en direct.</p>
+              <button className="primary-button practice-button" onClick={() => setNotice('La caméra sera connectée au service IA dans la prochaine version.')}>Activer la caméra</button>
+            </div>
+            <aside className="practice-side">
+              <div className="xp-badge">⚡ +20 XP</div>
+              <h2>Ton objectif</h2>
+              <p>Reproduis le signe avec une précision de 80 % ou plus.</p>
+              <div className="tip-card"><span>💡</span><p>Regarde bien l’orientation de la main avant de commencer.</p></div>
+            </aside>
+          </section>
         </main>
       )}
 
