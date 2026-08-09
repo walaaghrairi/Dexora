@@ -177,21 +177,25 @@ function App() {
           <section className="hero">
             <div>
               <p className="eyebrow">LANGUE DES SIGNES TUNISIENNE</p>
-              <h1>Apprendre, pratiquer, progresser.</h1>
-              <p className="hero-copy">TuniSign transforme l’apprentissage de la langue des signes tunisienne en une expérience visuelle, simple et motivante.</p>
+              <h1>{isAuthenticated ? `Prêt(e) à continuer${account ? `, ${account.firstName}` : ''} ?` : 'Apprendre, pratiquer, progresser.'}</h1>
+              <p className="hero-copy">{isAuthenticated ? 'Reprenez votre parcours, entraînez-vous devant la webcam et faites progresser votre score.' : 'TuniSign transforme l’apprentissage de la langue des signes tunisienne en une expérience visuelle, simple et motivante.'}</p>
               <div className="hero-actions">
-                <button className="primary-button" onClick={() => navigate('catalogue')}>Découvrir les leçons</button>
-                <button className="text-button" onClick={() => navigate('auth')}>Créer un compte →</button>
+                <button className="primary-button" onClick={() => navigate('catalogue')}>{isAuthenticated ? 'Continuer les leçons' : 'Découvrir les leçons'}</button>
+                {isAuthenticated ? (
+                  <button className="text-button" onClick={() => navigate('dashboard')}>Voir mon espace →</button>
+                ) : (
+                  <button className="text-button" onClick={() => { setIsRegistering(true); navigate('auth') }}>Créer un compte →</button>
+                )}
               </div>
             </div>
             <div className="hero-card" aria-label="Aperçu de la pratique">
               <span className="mascot-hand" aria-hidden="true">🤟</span>
               <div className="mascot-spark spark-one">✦</div>
               <div className="mascot-spark spark-two">✦</div>
-              <p>Pratique devant la webcam</p>
-              <strong>87 %</strong>
-              <small>Score de précision</small>
-              <div className="streak-pill">🔥 Série de 4 jours</div>
+              <p>{isAuthenticated ? 'Ton prochain objectif' : 'Pratique devant la webcam'}</p>
+              <strong>{isAuthenticated ? '01' : '87 %'}</strong>
+              <small>{isAuthenticated ? 'Leçon à commencer' : 'Score de précision'}</small>
+              <div className="streak-pill">{isAuthenticated ? '⚡ +20 XP à gagner' : '🔥 Série de 4 jours'}</div>
             </div>
           </section>
           <section className="feature-grid">
