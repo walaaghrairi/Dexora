@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.time.LocalDateTime;
 import java.util.stream.Collectors;
 
 @Service
@@ -23,6 +24,9 @@ public class CourseServiceImpl implements CourseService {
     @Override
     public CourseDTO create(CourseDTO courseDTO) {
         Course course = CourseMapper.toEntity(courseDTO);
+        if (course.getCreatedAt() == null) {
+            course.setCreatedAt(LocalDateTime.now());
+        }
         return CourseMapper.toDTO(courseRepository.save(course));
     }
 

@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.time.LocalDateTime;
 import java.util.stream.Collectors;
 
 @Service
@@ -23,6 +24,9 @@ public class PathServiceImpl implements PathService {
     @Override
     public PathDTO create(PathDTO pathDTO) {
         Path path = PathMapper.toEntity(pathDTO);
+        if (path.getCreatedAt() == null) {
+            path.setCreatedAt(LocalDateTime.now());
+        }
         return PathMapper.toDTO(pathRepository.save(path));
     }
 

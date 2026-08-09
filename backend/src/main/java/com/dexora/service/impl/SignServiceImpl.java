@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.time.LocalDateTime;
 import java.util.stream.Collectors;
 
 @Service
@@ -23,6 +24,9 @@ public class SignServiceImpl implements SignService {
     @Override
     public SignDTO create(SignDTO signDTO) {
         Sign sign = SignMapper.toEntity(signDTO);
+        if (sign.getCreatedAt() == null) {
+            sign.setCreatedAt(LocalDateTime.now());
+        }
         return SignMapper.toDTO(signRepository.save(sign));
     }
 
