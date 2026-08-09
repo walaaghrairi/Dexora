@@ -1,10 +1,11 @@
 spring:
   application:
     name: dexora
+
   datasource:
     url: jdbc:postgresql://localhost:5432/dexora_db
     username: postgres
-    password: change_me
+    password: 123
 
   jpa:
     hibernate:
@@ -15,3 +16,6 @@ spring:
     properties:
       hibernate:
         format_sql: true
+
+server:
+  port: 8081
