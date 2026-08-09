@@ -35,6 +35,7 @@ function App() {
         setCategories(loadedCategories)
         setCourses(loadedCourses)
         setSigns(loadedSigns)
+        setUsesDemoData(false)
       })
       .catch(() => {
         setCategories(demoCategories)
