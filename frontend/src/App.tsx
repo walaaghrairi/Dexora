@@ -5,8 +5,9 @@ import type { Account, Category, Course, Sign, TwoFactorSetup } from './types/ap
 import tunisignLogo from './assets/tunisign-sina-logo.png'
 import { translate, type Language, type TranslationKey } from './i18n'
 
-type Page = 'home' | 'catalogue' | 'dashboard' | 'settings' | 'auth' | 'practice' | 'twoFactor'
+type Page = 'home' | 'catalogue' | 'dashboard' | 'rewards' | 'settings' | 'auth' | 'practice' | 'twoFactor'
 type PracticeStatus = 'idle' | 'analyzing' | 'ready'
+type RewardType = 'badge' | 'certificate'
 
 const demoCategories: Category[] = [
   { id: 1, name: 'Salutations', description: 'Les expressions essentielles pour commencer une conversation.' },
@@ -41,6 +42,9 @@ function App() {
   const [sessionXp, setSessionXp] = useState(0)
   const [completedLessons, setCompletedLessons] = useState(0)
   const [sessionStreak, setSessionStreak] = useState(0)
+  const [courseBadgeProgress, setCourseBadgeProgress] = useState<Record<number, number>>({})
+  const [rewardType, setRewardType] = useState<RewardType>('badge')
+  const [selectedCertificate, setSelectedCertificate] = useState<Course | null>(null)
   const [language, setLanguage] = useState<Language>(() => {
     const saved = localStorage.getItem('tunisign_language')
     return saved === 'en' || saved === 'ar' ? saved : 'fr'
@@ -85,10 +89,29 @@ function App() {
     api.account().then(setAccount).catch(() => setNotice(translate(language, 'notice.profileLoad')))
   }, [isAuthenticated, language])
 
+  useEffect(() => {
+    const storageKey = `tunisign_badges_${account?.id ?? 'guest'}`
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey) || '{}') as Record<number, number>
+      setCourseBadgeProgress(saved)
+      setCompletedLessons(Object.values(saved).reduce((total, value) => total + value, 0))
+    } catch {
+      setCourseBadgeProgress({})
+      setCompletedLessons(0)
+    }
+  }, [account?.id])
+
   const displayedCourses = useMemo(
     () => selectedCategory === null ? courses : courses.filter((course) => course.categoryId === selectedCategory),
     [courses, selectedCategory],
   )
+
+  const earnedBadgeCount = Object.values(courseBadgeProgress).reduce((total, value) => total + value, 0)
+  const earnedCertificateCount = courses.filter((course) => (courseBadgeProgress[course.id] ?? 0) >= badgeTotal(course)).length
+
+  const selectedCourseSigns = selectedCourse ? signs.filter((sign) => sign.courseId === selectedCourse.id) : []
+  const selectedCourseEarned = selectedCourse ? courseBadgeProgress[selectedCourse.id] ?? 0 : 0
+  const activePracticeSign = selectedCourseSigns[Math.min(selectedCourseEarned, Math.max(selectedCourseSigns.length - 1, 0))]
 
   function categoryLabel(category: Category) {
     const keys: Record<number, TranslationKey> = { 1: 'category.greetings', 2: 'category.daily', 3: 'category.medical' }
@@ -103,6 +126,11 @@ function App() {
   function courseCopy(course: Course) {
     const keys: Record<number, TranslationKey> = { 1: 'course.firstCopy', 2: 'course.familyCopy', 3: 'course.emergencyCopy' }
     return keys[course.id] ? t(keys[course.id]) : course.description || t('catalog.defaultCopy')
+  }
+
+  function badgeTotal(course: Course) {
+    const lessonCount = signs.filter((sign) => sign.courseId === course.id).length
+    return lessonCount || 3
   }
 
   function navigate(nextPage: Page) {
@@ -135,9 +163,26 @@ function App() {
   }
 
   function completeLesson() {
-    setSessionXp((current) => current + 20)
-    setCompletedLessons((current) => current + 1)
-    setSessionStreak((current) => current + 1)
+    if (!selectedCourse) return
+    const totalBadges = badgeTotal(selectedCourse)
+    const currentBadges = courseBadgeProgress[selectedCourse.id] ?? 0
+    const nextBadges = Math.min(currentBadges + 1, totalBadges)
+
+    if (currentBadges >= totalBadges) {
+      setSelectedCertificate(selectedCourse)
+      return
+    }
+
+    if (nextBadges > currentBadges) {
+      const updatedProgress = { ...courseBadgeProgress, [selectedCourse.id]: nextBadges }
+      setCourseBadgeProgress(updatedProgress)
+      localStorage.setItem(`tunisign_badges_${account?.id ?? 'guest'}`, JSON.stringify(updatedProgress))
+      setSessionXp((current) => current + 20)
+      setCompletedLessons((current) => current + 1)
+      setSessionStreak((current) => current + 1)
+    }
+
+    setRewardType(nextBadges >= totalBadges ? 'certificate' : 'badge')
     setCelebrationOpen(true)
   }
 
@@ -222,6 +267,7 @@ function App() {
           <button className={page === 'home' ? 'active' : ''} onClick={() => navigate('home')}>{t('nav.home')}</button>
           <button className={page === 'catalogue' || page === 'practice' ? 'active' : ''} onClick={() => navigate('catalogue')}>{t('nav.learn')}</button>
           <button className={page === 'dashboard' || page === 'settings' ? 'active' : ''} onClick={() => navigate('dashboard')}>{t('nav.space')}</button>
+          <button className={page === 'rewards' ? 'active' : ''} onClick={() => navigate('rewards')}>{t('nav.rewards')}</button>
         </nav>
         <div className="topbar-actions">
           <label className="language-picker" aria-label="Language"><span>🌐</span><select value={language} onChange={(event) => setLanguage(event.target.value as Language)}><option value="fr">FR</option><option value="en">EN</option><option value="ar">عربي</option></select></label>
@@ -305,8 +351,8 @@ function App() {
           <button className="back-button" onClick={() => navigate('catalogue')}>{t('practice.back')}</button>
           <section className="practice-layout">
             <div className="practice-stage">
-              <div className="stage-header"><span>{t('practice.current')}</span><strong>1 / {Math.max(signs.filter((sign) => sign.courseId === selectedCourse.id).length, 1)}</strong></div>
-              <div className="practice-progress"><span /></div>
+              <div className="stage-header"><span>{t('practice.current')}</span><strong>{Math.min(selectedCourseEarned + 1, badgeTotal(selectedCourse))} / {badgeTotal(selectedCourse)}</strong></div>
+              <div className="practice-progress"><span style={{ width: `${Math.max(8, (selectedCourseEarned / badgeTotal(selectedCourse)) * 100)}%` }} /></div>
               <div className={`camera-stage ${practiceStatus}`}>
                 <div className="camera-grid" aria-hidden="true" /><span className="camera-corner corner-one" /><span className="camera-corner corner-two" /><span className="camera-corner corner-three" /><span className="camera-corner corner-four" />
                 <div className="sign-visual"><span>👋</span><i>✦</i><i>✦</i></div>
@@ -314,7 +360,7 @@ function App() {
                 <div className="camera-status"><i /> {practiceStatus === 'analyzing' ? t('practice.analyzing') : practiceStatus === 'ready' ? t('practice.detected') : t('practice.cameraReady')}</div>
               </div>
               <p className="eyebrow">{t('practice.reproduce')}</p>
-              <h1>{signs.find((sign) => sign.courseId === selectedCourse.id)?.word || courseTitle(selectedCourse)}</h1>
+              <h1>{activePracticeSign?.word || `${courseTitle(selectedCourse)} · ${selectedCourseEarned + 1}`}</h1>
               <p>{t('practice.copy')}</p>
               <button className="primary-button practice-button" onClick={startAnalysis} disabled={practiceStatus === 'analyzing'}>{practiceStatus === 'analyzing' ? t('practice.analyzingButton') : practiceStatus === 'ready' ? t('practice.retry') : t('practice.activate')}</button>
             </div>
@@ -353,6 +399,38 @@ function App() {
             </div>
           </section>
           <article className="recommendation"><span>✦</span><div><h2>{t('dashboard.recommendation')}</h2><p>{t('dashboard.recommendationCopy')}</p></div><button className="primary-button compact" onClick={() => navigate('catalogue')}>{t('dashboard.viewLessons')}</button></article>
+        </main>
+      )}
+
+      {page === 'rewards' && (
+        <main className="content-page rewards-page">
+          <p className="eyebrow">{t('rewards.eyebrow')}</p>
+          <h1>{t('rewards.title')}</h1>
+          <p className="page-intro">{t('rewards.copy')}</p>
+          <section className="reward-summary">
+            <article><span>🏅</span><strong>{earnedBadgeCount}</strong><p>{t('rewards.badges')}</p></article>
+            <article><span>📜</span><strong>{earnedCertificateCount}</strong><p>{t('rewards.certificates')}</p></article>
+          </section>
+          {courses.length ? <section className="reward-course-grid">
+            {courses.map((course) => {
+              const total = badgeTotal(course)
+              const earned = Math.min(courseBadgeProgress[course.id] ?? 0, total)
+              const certificateUnlocked = earned === total
+              const remaining = total - earned
+              return <article className={`reward-course-card ${certificateUnlocked ? 'certificate-unlocked' : ''}`} key={course.id}>
+                <header><div className="reward-course-icon">{certificateUnlocked ? '🏆' : '🤟'}</div><div><p className="eyebrow">{t('rewards.courseProgress')}</p><h2>{courseTitle(course)}</h2></div><strong>{Math.round((earned / total) * 100)}%</strong></header>
+                <div className="reward-progress"><span style={{ width: `${(earned / total) * 100}%` }} /></div>
+                <p className="badge-count">{t('rewards.badgeProgress', { earned, total, plural: language !== 'ar' && earned !== 1 ? 's' : '' })}</p>
+                <div className="badge-collection">
+                  {Array.from({ length: total }, (_, index) => {
+                    const isEarned = index < earned
+                    return <div className={`lesson-badge ${isEarned ? 'earned' : 'locked'}`} key={index}><span>{isEarned ? '★' : '🔒'}</span><b>{t('rewards.lessonBadge', { number: index + 1 })}</b><small>{isEarned ? t('rewards.earned') : t('rewards.locked')}</small></div>
+                  })}
+                </div>
+                <div className={`course-certificate ${certificateUnlocked ? 'unlocked' : 'locked'}`}><span>{certificateUnlocked ? '📜' : '🔐'}</span><div><h3>{t('rewards.certificate')}</h3><p>{certificateUnlocked ? t('rewards.certificateReady') : t('rewards.certificateLocked', { remaining, plural: language !== 'ar' && remaining !== 1 ? 's' : '' })}</p></div>{certificateUnlocked && <button className="primary-button compact" onClick={() => setSelectedCertificate(course)}>{t('rewards.viewCertificate')}</button>}</div>
+              </article>
+            })}
+          </section> : <p>{t('rewards.empty')}</p>}
         </main>
       )}
 
@@ -403,7 +481,14 @@ function App() {
 
       {celebrationOpen && <div className="celebration-overlay" role="dialog" aria-modal="true" aria-label="Leçon terminée">
         <div className="confetti" aria-hidden="true"><i /><i /><i /><i /><i /><i /></div>
-        <section className="celebration-card"><span className="celebration-medal">🏆</span><p className="eyebrow">{t('celebration.eyebrow')}</p><h1>{t('celebration.title')}</h1><p>{t('celebration.copy')}</p><strong>+20 XP</strong><div className="celebration-stars" aria-label="Trois étoiles">★ ★ ★</div><button className="primary-button" onClick={() => { setCelebrationOpen(false); navigate('dashboard') }}>{t('celebration.view')}</button></section>
+        <section className="celebration-card"><span className="celebration-medal">{rewardType === 'certificate' ? '📜' : '🏅'}</span><p className="eyebrow">{t('celebration.eyebrow')}</p><h1>{rewardType === 'certificate' ? t('celebration.certificateTitle') : t('celebration.badgeTitle')}</h1><p>{rewardType === 'certificate' ? t('celebration.certificateCopy') : t('celebration.badgeCopy')}</p><strong>+20 XP</strong><div className="celebration-stars" aria-label="Trois étoiles">★ ★ ★</div><button className="primary-button" onClick={() => { setCelebrationOpen(false); navigate('rewards') }}>{t('celebration.viewRewards')}</button></section>
+      </div>}
+
+      {selectedCertificate && <div className="certificate-overlay" role="dialog" aria-modal="true">
+        <section className="certificate-sheet">
+          <div className="certificate-border"><img src={tunisignLogo} alt="TuniSign" /><p className="certificate-kicker">{t('certificate.awarded')}</p><h1>{courseTitle(selectedCertificate)}</h1><p>{t('certificate.certifies')}</p><h2>{account ? `${account.firstName} ${account.lastName}` : t('certificate.student')}</h2><p>{t('certificate.completed')}</p><strong>{courseTitle(selectedCertificate)}</strong><div className="certificate-seal">🏆<small>TuniSign</small></div><p className="certificate-date">{t('certificate.date', { date: new Intl.DateTimeFormat(language === 'ar' ? 'ar-TN' : language === 'en' ? 'en-GB' : 'fr-FR').format(new Date()) })}</p><div className="certificate-signature"><span /><b>TuniSign · SINA</b></div></div>
+          <div className="certificate-actions"><button className="ghost-button" onClick={() => setSelectedCertificate(null)}>{t('certificate.close')}</button><button className="primary-button compact" onClick={() => window.print()}>{t('certificate.print')}</button></div>
+        </section>
       </div>}
     </div>
   )
