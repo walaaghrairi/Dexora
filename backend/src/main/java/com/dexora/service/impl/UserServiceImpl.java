@@ -2,6 +2,7 @@ package com.dexora.service.impl;
 
 import com.dexora.dto.UserDTO;
 import com.dexora.entity.User;
+import com.dexora.exception.ResourceNotFoundException;
 import com.dexora.mapper.UserMapper;
 import com.dexora.repository.UserRepository;
 import com.dexora.service.UserService;
@@ -28,7 +29,7 @@ public class UserServiceImpl implements UserService {
     @Override
     public UserDTO update(UserDTO userDTO) {
         if (!userRepository.existsById(userDTO.getId())) {
-            throw new RuntimeException("User not found");
+            throw new ResourceNotFoundException("User not found");
         }
         User user = UserMapper.toEntity(userDTO);
         return UserMapper.toDTO(userRepository.save(user));
@@ -38,7 +39,7 @@ public class UserServiceImpl implements UserService {
     public UserDTO findById(Long id) {
         return userRepository.findById(id)
                 .map(UserMapper::toDTO)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
     }
 
     @Override
@@ -51,7 +52,7 @@ public class UserServiceImpl implements UserService {
     @Override
     public void delete(Long id) {
         if (!userRepository.existsById(id)) {
-            throw new RuntimeException("User not found");
+            throw new ResourceNotFoundException("User not found");
         }
         userRepository.deleteById(id);
     }

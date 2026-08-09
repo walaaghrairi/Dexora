@@ -2,6 +2,7 @@ package com.dexora.service.impl;
 
 import com.dexora.dto.CourseProgressDTO;
 import com.dexora.entity.CourseProgress;
+import com.dexora.exception.ResourceNotFoundException;
 import com.dexora.mapper.CourseProgressMapper;
 import com.dexora.repository.CourseProgressRepository;
 import com.dexora.service.CourseProgressService;
@@ -28,7 +29,7 @@ public class CourseProgressServiceImpl implements CourseProgressService {
     @Override
     public CourseProgressDTO update(CourseProgressDTO courseProgressDTO) {
         if (!courseProgressRepository.existsById(courseProgressDTO.getId())) {
-            throw new RuntimeException("CourseProgress not found");
+            throw new ResourceNotFoundException("CourseProgress not found");
         }
         CourseProgress courseProgress = CourseProgressMapper.toEntity(courseProgressDTO);
         return CourseProgressMapper.toDTO(courseProgressRepository.save(courseProgress));
@@ -38,7 +39,7 @@ public class CourseProgressServiceImpl implements CourseProgressService {
     public CourseProgressDTO findById(Long id) {
         return courseProgressRepository.findById(id)
                 .map(CourseProgressMapper::toDTO)
-                .orElseThrow(() -> new RuntimeException("CourseProgress not found"));
+                .orElseThrow(() -> new ResourceNotFoundException("CourseProgress not found"));
     }
 
     @Override
@@ -51,7 +52,7 @@ public class CourseProgressServiceImpl implements CourseProgressService {
     @Override
     public void delete(Long id) {
         if (!courseProgressRepository.existsById(id)) {
-            throw new RuntimeException("CourseProgress not found");
+            throw new ResourceNotFoundException("CourseProgress not found");
         }
         courseProgressRepository.deleteById(id);
     }

@@ -2,6 +2,7 @@ package com.dexora.service.impl;
 
 import com.dexora.dto.CategoryDTO;
 import com.dexora.entity.Category;
+import com.dexora.exception.ResourceNotFoundException;
 import com.dexora.mapper.CategoryMapper;
 import com.dexora.repository.CategoryRepository;
 import com.dexora.service.CategoryService;
@@ -28,7 +29,7 @@ public class CategoryServiceImpl implements CategoryService {
     @Override
     public CategoryDTO update(CategoryDTO categoryDTO) {
         if (!categoryRepository.existsById(categoryDTO.getId())) {
-            throw new RuntimeException("Category not found");
+            throw new ResourceNotFoundException("Category not found");
         }
         Category category = CategoryMapper.toEntity(categoryDTO);
         return CategoryMapper.toDTO(categoryRepository.save(category));
@@ -38,7 +39,7 @@ public class CategoryServiceImpl implements CategoryService {
     public CategoryDTO findById(Long id) {
         return categoryRepository.findById(id)
                 .map(CategoryMapper::toDTO)
-                .orElseThrow(() -> new RuntimeException("Category not found"));
+                .orElseThrow(() -> new ResourceNotFoundException("Category not found"));
     }
 
     @Override
@@ -51,7 +52,7 @@ public class CategoryServiceImpl implements CategoryService {
     @Override
     public void delete(Long id) {
         if (!categoryRepository.existsById(id)) {
-            throw new RuntimeException("Category not found");
+            throw new ResourceNotFoundException("Category not found");
         }
         categoryRepository.deleteById(id);
     }

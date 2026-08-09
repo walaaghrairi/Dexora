@@ -2,6 +2,7 @@ package com.dexora.service.impl;
 
 import com.dexora.dto.CertifDTO;
 import com.dexora.entity.Certif;
+import com.dexora.exception.ResourceNotFoundException;
 import com.dexora.mapper.CertifMapper;
 import com.dexora.repository.CertifRepository;
 import com.dexora.service.CertifService;
@@ -28,7 +29,7 @@ public class CertifServiceImpl implements CertifService {
     @Override
     public CertifDTO update(CertifDTO certifDTO) {
         if (!certifRepository.existsById(certifDTO.getId())) {
-            throw new RuntimeException("Certif not found");
+            throw new ResourceNotFoundException("Certif not found");
         }
         Certif certif = CertifMapper.toEntity(certifDTO);
         return CertifMapper.toDTO(certifRepository.save(certif));
@@ -38,7 +39,7 @@ public class CertifServiceImpl implements CertifService {
     public CertifDTO findById(Long id) {
         return certifRepository.findById(id)
                 .map(CertifMapper::toDTO)
-                .orElseThrow(() -> new RuntimeException("Certif not found"));
+                .orElseThrow(() -> new ResourceNotFoundException("Certif not found"));
     }
 
     @Override
@@ -51,7 +52,7 @@ public class CertifServiceImpl implements CertifService {
     @Override
     public void delete(Long id) {
         if (!certifRepository.existsById(id)) {
-            throw new RuntimeException("Certif not found");
+            throw new ResourceNotFoundException("Certif not found");
         }
         certifRepository.deleteById(id);
     }

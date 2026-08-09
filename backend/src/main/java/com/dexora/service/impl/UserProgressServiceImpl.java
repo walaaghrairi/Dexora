@@ -2,6 +2,7 @@ package com.dexora.service.impl;
 
 import com.dexora.dto.UserProgressDTO;
 import com.dexora.entity.UserProgress;
+import com.dexora.exception.ResourceNotFoundException;
 import com.dexora.mapper.UserProgressMapper;
 import com.dexora.repository.UserProgressRepository;
 import com.dexora.service.UserProgressService;
@@ -28,7 +29,7 @@ public class UserProgressServiceImpl implements UserProgressService {
     @Override
     public UserProgressDTO update(UserProgressDTO userProgressDTO) {
         if (!userProgressRepository.existsById(userProgressDTO.getId())) {
-            throw new RuntimeException("UserProgress not found");
+            throw new ResourceNotFoundException("UserProgress not found");
         }
         UserProgress userProgress = UserProgressMapper.toEntity(userProgressDTO);
         return UserProgressMapper.toDTO(userProgressRepository.save(userProgress));
@@ -38,7 +39,7 @@ public class UserProgressServiceImpl implements UserProgressService {
     public UserProgressDTO findById(Long id) {
         return userProgressRepository.findById(id)
                 .map(UserProgressMapper::toDTO)
-                .orElseThrow(() -> new RuntimeException("UserProgress not found"));
+                .orElseThrow(() -> new ResourceNotFoundException("UserProgress not found"));
     }
 
     @Override
@@ -51,7 +52,7 @@ public class UserProgressServiceImpl implements UserProgressService {
     @Override
     public void delete(Long id) {
         if (!userProgressRepository.existsById(id)) {
-            throw new RuntimeException("UserProgress not found");
+            throw new ResourceNotFoundException("UserProgress not found");
         }
         userProgressRepository.deleteById(id);
     }

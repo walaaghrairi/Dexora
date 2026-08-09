@@ -2,6 +2,7 @@ package com.dexora.service.impl;
 
 import com.dexora.dto.UserPathDTO;
 import com.dexora.entity.UserPath;
+import com.dexora.exception.ResourceNotFoundException;
 import com.dexora.mapper.UserPathMapper;
 import com.dexora.repository.UserPathRepository;
 import com.dexora.service.UserPathService;
@@ -28,7 +29,7 @@ public class UserPathServiceImpl implements UserPathService {
     @Override
     public UserPathDTO update(UserPathDTO userPathDTO) {
         if (!userPathRepository.existsById(userPathDTO.getId())) {
-            throw new RuntimeException("UserPath not found");
+            throw new ResourceNotFoundException("UserPath not found");
         }
         UserPath userPath = UserPathMapper.toEntity(userPathDTO);
         return UserPathMapper.toDTO(userPathRepository.save(userPath));
@@ -38,7 +39,7 @@ public class UserPathServiceImpl implements UserPathService {
     public UserPathDTO findById(Long id) {
         return userPathRepository.findById(id)
                 .map(UserPathMapper::toDTO)
-                .orElseThrow(() -> new RuntimeException("UserPath not found"));
+                .orElseThrow(() -> new ResourceNotFoundException("UserPath not found"));
     }
 
     @Override
@@ -51,7 +52,7 @@ public class UserPathServiceImpl implements UserPathService {
     @Override
     public void delete(Long id) {
         if (!userPathRepository.existsById(id)) {
-            throw new RuntimeException("UserPath not found");
+            throw new ResourceNotFoundException("UserPath not found");
         }
         userPathRepository.deleteById(id);
     }

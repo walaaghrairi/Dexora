@@ -2,6 +2,7 @@ package com.dexora.service.impl;
 
 import com.dexora.dto.PathDTO;
 import com.dexora.entity.Path;
+import com.dexora.exception.ResourceNotFoundException;
 import com.dexora.mapper.PathMapper;
 import com.dexora.repository.PathRepository;
 import com.dexora.service.PathService;
@@ -28,7 +29,7 @@ public class PathServiceImpl implements PathService {
     @Override
     public PathDTO update(PathDTO pathDTO) {
         if (!pathRepository.existsById(pathDTO.getId())) {
-            throw new RuntimeException("Path not found");
+            throw new ResourceNotFoundException("Path not found");
         }
         Path path = PathMapper.toEntity(pathDTO);
         return PathMapper.toDTO(pathRepository.save(path));
@@ -38,7 +39,7 @@ public class PathServiceImpl implements PathService {
     public PathDTO findById(Long id) {
         return pathRepository.findById(id)
                 .map(PathMapper::toDTO)
-                .orElseThrow(() -> new RuntimeException("Path not found"));
+                .orElseThrow(() -> new ResourceNotFoundException("Path not found"));
     }
 
     @Override
@@ -51,7 +52,7 @@ public class PathServiceImpl implements PathService {
     @Override
     public void delete(Long id) {
         if (!pathRepository.existsById(id)) {
-            throw new RuntimeException("Path not found");
+            throw new ResourceNotFoundException("Path not found");
         }
         pathRepository.deleteById(id);
     }

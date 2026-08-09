@@ -2,6 +2,7 @@ package com.dexora.service.impl;
 
 import com.dexora.dto.CourseDTO;
 import com.dexora.entity.Course;
+import com.dexora.exception.ResourceNotFoundException;
 import com.dexora.mapper.CourseMapper;
 import com.dexora.repository.CourseRepository;
 import com.dexora.service.CourseService;
@@ -28,7 +29,7 @@ public class CourseServiceImpl implements CourseService {
     @Override
     public CourseDTO update(CourseDTO courseDTO) {
         if (!courseRepository.existsById(courseDTO.getId())) {
-            throw new RuntimeException("Course not found");
+            throw new ResourceNotFoundException("Course not found");
         }
         Course course = CourseMapper.toEntity(courseDTO);
         return CourseMapper.toDTO(courseRepository.save(course));
@@ -38,7 +39,7 @@ public class CourseServiceImpl implements CourseService {
     public CourseDTO findById(Long id) {
         return courseRepository.findById(id)
                 .map(CourseMapper::toDTO)
-                .orElseThrow(() -> new RuntimeException("Course not found"));
+                .orElseThrow(() -> new ResourceNotFoundException("Course not found"));
     }
 
     @Override
@@ -51,7 +52,7 @@ public class CourseServiceImpl implements CourseService {
     @Override
     public void delete(Long id) {
         if (!courseRepository.existsById(id)) {
-            throw new RuntimeException("Course not found");
+            throw new ResourceNotFoundException("Course not found");
         }
         courseRepository.deleteById(id);
     }

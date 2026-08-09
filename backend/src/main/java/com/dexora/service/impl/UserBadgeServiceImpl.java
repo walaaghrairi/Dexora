@@ -2,6 +2,7 @@ package com.dexora.service.impl;
 
 import com.dexora.dto.UserBadgeDTO;
 import com.dexora.entity.UserBadge;
+import com.dexora.exception.ResourceNotFoundException;
 import com.dexora.mapper.UserBadgeMapper;
 import com.dexora.repository.UserBadgeRepository;
 import com.dexora.service.UserBadgeService;
@@ -28,7 +29,7 @@ public class UserBadgeServiceImpl implements UserBadgeService {
     @Override
     public UserBadgeDTO update(UserBadgeDTO userBadgeDTO) {
         if (!userBadgeRepository.existsById(userBadgeDTO.getId())) {
-            throw new RuntimeException("UserBadge not found");
+            throw new ResourceNotFoundException("UserBadge not found");
         }
         UserBadge userBadge = UserBadgeMapper.toEntity(userBadgeDTO);
         return UserBadgeMapper.toDTO(userBadgeRepository.save(userBadge));
@@ -38,7 +39,7 @@ public class UserBadgeServiceImpl implements UserBadgeService {
     public UserBadgeDTO findById(Long id) {
         return userBadgeRepository.findById(id)
                 .map(UserBadgeMapper::toDTO)
-                .orElseThrow(() -> new RuntimeException("UserBadge not found"));
+                .orElseThrow(() -> new ResourceNotFoundException("UserBadge not found"));
     }
 
     @Override
@@ -51,7 +52,7 @@ public class UserBadgeServiceImpl implements UserBadgeService {
     @Override
     public void delete(Long id) {
         if (!userBadgeRepository.existsById(id)) {
-            throw new RuntimeException("UserBadge not found");
+            throw new ResourceNotFoundException("UserBadge not found");
         }
         userBadgeRepository.deleteById(id);
     }

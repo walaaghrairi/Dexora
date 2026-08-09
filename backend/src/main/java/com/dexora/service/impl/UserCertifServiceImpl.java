@@ -2,6 +2,7 @@ package com.dexora.service.impl;
 
 import com.dexora.dto.UserCertifDTO;
 import com.dexora.entity.UserCertif;
+import com.dexora.exception.ResourceNotFoundException;
 import com.dexora.mapper.UserCertifMapper;
 import com.dexora.repository.UserCertifRepository;
 import com.dexora.service.UserCertifService;
@@ -28,7 +29,7 @@ public class UserCertifServiceImpl implements UserCertifService {
     @Override
     public UserCertifDTO update(UserCertifDTO userCertifDTO) {
         if (!userCertifRepository.existsById(userCertifDTO.getId())) {
-            throw new RuntimeException("UserCertif not found");
+            throw new ResourceNotFoundException("UserCertif not found");
         }
         UserCertif userCertif = UserCertifMapper.toEntity(userCertifDTO);
         return UserCertifMapper.toDTO(userCertifRepository.save(userCertif));
@@ -38,7 +39,7 @@ public class UserCertifServiceImpl implements UserCertifService {
     public UserCertifDTO findById(Long id) {
         return userCertifRepository.findById(id)
                 .map(UserCertifMapper::toDTO)
-                .orElseThrow(() -> new RuntimeException("UserCertif not found"));
+                .orElseThrow(() -> new ResourceNotFoundException("UserCertif not found"));
     }
 
     @Override
@@ -51,7 +52,7 @@ public class UserCertifServiceImpl implements UserCertifService {
     @Override
     public void delete(Long id) {
         if (!userCertifRepository.existsById(id)) {
-            throw new RuntimeException("UserCertif not found");
+            throw new ResourceNotFoundException("UserCertif not found");
         }
         userCertifRepository.deleteById(id);
     }
