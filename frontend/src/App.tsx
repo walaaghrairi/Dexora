@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { api } from './services/api'
-import type { Category, Course, Sign } from './types/api'
+import type { Account, Category, Course, Sign, TwoFactorSetup } from './types/api'
 
 type Page = 'home' | 'catalogue' | 'dashboard' | 'auth' | 'practice'
 
@@ -29,6 +29,8 @@ function App() {
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null)
   const [isRegistering, setIsRegistering] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(localStorage.getItem('tunisign_token')))
+  const [account, setAccount] = useState<Account | null>(null)
+  const [twoFactorSetup, setTwoFactorSetup] = useState<TwoFactorSetup | null>(null)
 
   useEffect(() => {
     Promise.allSettled([api.categories(), api.courses(), api.signs()])
@@ -56,6 +58,11 @@ function App() {
       .finally(() => setLoading(false))
   }, [isAuthenticated])
 
+  useEffect(() => {
+    if (!isAuthenticated) { setAccount(null); return }
+    api.account().then(setAccount).catch(() => setNotice('Impossible de charger votre profil.'))
+  }, [isAuthenticated])
+
   const displayedCourses = useMemo(
     () => selectedCategory === null ? courses : courses.filter((course) => course.categoryId === selectedCategory),
     [courses, selectedCategory],
@@ -80,7 +87,7 @@ function App() {
     try {
       const response = isRegistering
         ? await api.register(String(data.get('firstName')), String(data.get('lastName')), email, password)
-        : await api.login(email, password)
+        : await api.login(email, password, String(data.get('twoFactorCode') || ''))
       localStorage.setItem('tunisign_token', response.token)
       setIsAuthenticated(true)
       navigate('dashboard')
@@ -95,6 +102,33 @@ function App() {
     setIsAuthenticated(false)
     navigate('home')
     setNotice('Vous êtes déconnecté(e).')
+  }
+
+  async function updateProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const data = new FormData(event.currentTarget)
+    try {
+      const updated = await api.updateAccount(String(data.get('firstName')), String(data.get('lastName')), String(data.get('email')))
+      setAccount(updated); setNotice('Vos informations personnelles sont enregistrées.')
+    } catch { setNotice('Impossible d’enregistrer le profil.') }
+  }
+
+  async function updatePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const data = new FormData(event.currentTarget)
+    try { await api.changePassword(String(data.get('currentPassword')), String(data.get('newPassword'))); event.currentTarget.reset(); setNotice('Votre mot de passe a été modifié.') }
+    catch { setNotice('Le mot de passe actuel est incorrect ou le nouveau mot de passe est invalide.') }
+  }
+
+  async function setupTwoFactor() {
+    try { setTwoFactorSetup(await api.setupTwoFactor()) } catch { setNotice('Impossible de préparer la 2FA.') }
+  }
+
+  async function enableTwoFactor(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const data = new FormData(event.currentTarget)
+    try { await api.enableTwoFactor(String(data.get('code'))); setAccount((current) => current ? { ...current, twoFactorEnabled: true } : current); setTwoFactorSetup(null); setNotice('Google Authenticator est activé.') }
+    catch { setNotice('Le code à six chiffres est incorrect.') }
   }
 
   return (
@@ -209,6 +243,14 @@ function App() {
             <article><strong>0</strong><span>Badges obtenus</span></article>
           </section>
           <article className="recommendation"><span>✦</span><div><h2>Recommandation</h2><p>Commencez par la catégorie « Salutations » et entraînez-vous régulièrement.</p></div><button className="primary-button compact" onClick={() => navigate('catalogue')}>Voir les leçons</button></article>
+          {isAuthenticated && account && <section className="account-section">
+            <div className="section-heading"><div><p className="eyebrow">PARAMÈTRES DU COMPTE</p><h2>Mon profil et ma sécurité</h2></div><div className="account-avatar">{account.firstName.slice(0, 1)}{account.lastName.slice(0, 1)}</div></div>
+            <div className="account-grid">
+              <form className="account-card" onSubmit={updateProfile}><h3>Informations personnelles</h3><p>Modifiez vos informations de connexion.</p><div className="form-row"><label>Prénom<input name="firstName" defaultValue={account.firstName} required /></label><label>Nom<input name="lastName" defaultValue={account.lastName} required /></label></div><label>E-mail<input name="email" type="email" defaultValue={account.email} required /></label><button className="primary-button compact" type="submit">Enregistrer</button></form>
+              <form className="account-card" onSubmit={updatePassword}><h3>Mot de passe</h3><p>Choisissez un mot de passe robuste.</p><label>Mot de passe actuel<input name="currentPassword" type="password" required /></label><label>Nouveau mot de passe<input name="newPassword" type="password" minLength={8} required /></label><button className="primary-button compact" type="submit">Modifier le mot de passe</button></form>
+              <article className="account-card two-factor-card"><div className="two-factor-title"><span>🔐</span><div><h3>Google Authenticator</h3><p>{account.twoFactorEnabled ? '2FA activée : votre compte est protégé.' : 'Ajoutez une seconde protection à votre compte.'}</p></div></div>{!account.twoFactorEnabled && !twoFactorSetup && <button className="primary-button compact" onClick={setupTwoFactor}>Configurer la 2FA</button>}{twoFactorSetup && <form className="two-factor-setup" onSubmit={enableTwoFactor}><p>Dans Google Authenticator, ajoutez une clé de configuration manuelle :</p><code>{twoFactorSetup.secret}</code><small>Compte : {account.email} · Type : Basé sur l’heure</small><label>Code à six chiffres<input name="code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} placeholder="123456" required /></label><button className="primary-button compact" type="submit">Vérifier et activer</button></form>}</article>
+            </div>
+          </section>}
         </main>
       )}
 
@@ -221,6 +263,7 @@ function App() {
               {isRegistering && <div className="form-row"><label>Prénom<input required name="firstName" /></label><label>Nom<input required name="lastName" /></label></div>}
               <label>E-mail<input required type="email" name="email" placeholder="nom@exemple.com" /></label>
               <label>Mot de passe<input required minLength={6} type="password" name="password" placeholder="Minimum 6 caractères" /></label>
+              {!isRegistering && <label>Code Google Authenticator <span className="optional-label">(si la 2FA est activée)</span><input inputMode="numeric" name="twoFactorCode" maxLength={6} placeholder="123456" /></label>}
               <button className="primary-button" type="submit">{isRegistering ? 'Créer mon compte' : 'Connexion'}</button>
             </form>
             <button className="text-button" onClick={() => setIsRegistering(!isRegistering)}>{isRegistering ? 'J’ai déjà un compte' : 'Créer un compte'}</button>

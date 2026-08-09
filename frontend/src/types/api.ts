@@ -24,3 +24,13 @@ export type Sign = {
 }
 
 export type AuthResponse = { token: string }
+
+export type Account = {
+  id: number
+  firstName: string
+  lastName: string
+  email: string
+  twoFactorEnabled: boolean
+}
+
+export type TwoFactorSetup = { secret: string; otpAuthUri: string }

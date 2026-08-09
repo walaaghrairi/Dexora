@@ -58,4 +58,10 @@ public class User {
     @CreationTimestamp
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
+
+    @Column(nullable = false)
+    private boolean twoFactorEnabled = false;
+
+    @Column(length = 128)
+    private String twoFactorSecret;
 }
