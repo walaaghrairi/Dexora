@@ -4,10 +4,12 @@ Ce service charge un modèle Keras d'images fixes et expose `POST /predict`.
 
 ## Installation et démarrage
 
+Python **3.12 x64** est requis. Python 3.14 n'est pas encore compatible avec TensorFlow 2.18.
+
 Depuis `ai-service` :
 
 ```powershell
-python -m venv .venv
+py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
