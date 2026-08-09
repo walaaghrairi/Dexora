@@ -30,16 +30,26 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(localStorage.getItem('tunisign_token')))
 
   useEffect(() => {
-    Promise.all([api.categories(), api.courses(), api.signs()])
-      .then(([loadedCategories, loadedCourses, loadedSigns]) => {
-        setCategories(loadedCategories)
-        setCourses(loadedCourses)
-        setSigns(loadedSigns)
+    Promise.allSettled([api.categories(), api.courses(), api.signs()])
+      .then(([categoriesResult, coursesResult, signsResult]) => {
+        const hasLearningData = categoriesResult.status === 'fulfilled' && coursesResult.status === 'fulfilled'
+        if (!hasLearningData) {
+          setCategories(demoCategories)
+          setCourses(demoCourses)
+          setSigns([])
+          setUsesDemoData(true)
+          return
+        }
+
+        setCategories(categoriesResult.value)
+        setCourses(coursesResult.value)
+        setSigns(signsResult.status === 'fulfilled' ? signsResult.value : [])
         setUsesDemoData(false)
       })
       .catch(() => {
         setCategories(demoCategories)
         setCourses(demoCourses)
+        setSigns([])
         setUsesDemoData(true)
       })
       .finally(() => setLoading(false))
