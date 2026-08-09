@@ -3,6 +3,7 @@ import type { CSSProperties, FormEvent } from 'react'
 import { api } from './services/api'
 import type { Account, Category, Course, Sign, TwoFactorSetup } from './types/api'
 import tunisignLogo from './assets/tunisign-sina-logo.png'
+import { translate, type Language, type TranslationKey } from './i18n'
 
 type Page = 'home' | 'catalogue' | 'dashboard' | 'settings' | 'auth' | 'practice' | 'twoFactor'
 type PracticeStatus = 'idle' | 'analyzing' | 'ready'
@@ -40,6 +41,18 @@ function App() {
   const [sessionXp, setSessionXp] = useState(0)
   const [completedLessons, setCompletedLessons] = useState(0)
   const [sessionStreak, setSessionStreak] = useState(0)
+  const [language, setLanguage] = useState<Language>(() => {
+    const saved = localStorage.getItem('tunisign_language')
+    return saved === 'en' || saved === 'ar' ? saved : 'fr'
+  })
+
+  const t = (key: TranslationKey, values?: Record<string, string | number>) => translate(language, key, values)
+
+  useEffect(() => {
+    localStorage.setItem('tunisign_language', language)
+    document.documentElement.lang = language
+    document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr'
+  }, [language])
 
   useEffect(() => {
     Promise.allSettled([api.categories(), api.courses(), api.signs()])
@@ -69,13 +82,28 @@ function App() {
 
   useEffect(() => {
     if (!isAuthenticated) { setAccount(null); return }
-    api.account().then(setAccount).catch(() => setNotice('Impossible de charger votre profil.'))
-  }, [isAuthenticated])
+    api.account().then(setAccount).catch(() => setNotice(translate(language, 'notice.profileLoad')))
+  }, [isAuthenticated, language])
 
   const displayedCourses = useMemo(
     () => selectedCategory === null ? courses : courses.filter((course) => course.categoryId === selectedCategory),
     [courses, selectedCategory],
   )
+
+  function categoryLabel(category: Category) {
+    const keys: Record<number, TranslationKey> = { 1: 'category.greetings', 2: 'category.daily', 3: 'category.medical' }
+    return keys[category.id] ? t(keys[category.id]) : category.name
+  }
+
+  function courseTitle(course: Course) {
+    const keys: Record<number, TranslationKey> = { 1: 'course.first', 2: 'course.family', 3: 'course.emergency' }
+    return keys[course.id] ? t(keys[course.id]) : course.title
+  }
+
+  function courseCopy(course: Course) {
+    const keys: Record<number, TranslationKey> = { 1: 'course.firstCopy', 2: 'course.familyCopy', 3: 'course.emergencyCopy' }
+    return keys[course.id] ? t(keys[course.id]) : course.description || t('catalog.defaultCopy')
+  }
 
   function navigate(nextPage: Page) {
     setNotice('')
@@ -99,10 +127,10 @@ function App() {
 
   function startAnalysis() {
     setPracticeStatus('analyzing')
-    setNotice('Analyse visuelle en cours : position, orientation et mouvement…')
+    setNotice(t('notice.analysis'))
     window.setTimeout(() => {
       setPracticeStatus('ready')
-      setNotice('Analyse prête : excellente position de départ.')
+      setNotice(t('notice.analysisReady'))
     }, 1500)
   }
 
@@ -125,16 +153,16 @@ function App() {
       if (response.twoFactorRequired && response.email) {
         setPendingTwoFactorEmail(response.email)
         navigate('twoFactor')
-        setNotice('Votre compte est protégé par Google Authenticator.')
+        setNotice(t('notice.twoFactorProtected'))
         return
       }
-      if (!response.token) throw new Error('Connexion impossible.')
+      if (!response.token) throw new Error(t('notice.loginError'))
       localStorage.setItem('tunisign_token', response.token)
       setIsAuthenticated(true)
       navigate('dashboard')
-      setNotice('Bienvenue dans TuniSign. Votre session est ouverte.')
+      setNotice(t('notice.loginWelcome'))
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'Connexion impossible.')
+      setNotice(error instanceof Error ? error.message : t('notice.loginError'))
     }
   }
 
@@ -142,7 +170,7 @@ function App() {
     localStorage.removeItem('tunisign_token')
     setIsAuthenticated(false)
     navigate('home')
-    setNotice('Vous êtes déconnecté(e).')
+    setNotice(t('notice.logout'))
   }
 
   async function verifyTwoFactor(event: FormEvent<HTMLFormElement>) {
@@ -152,8 +180,8 @@ function App() {
       const response = await api.verifyTwoFactor(pendingTwoFactorEmail, code)
       if (!response.token) throw new Error('Code invalide.')
       localStorage.setItem('tunisign_token', response.token)
-      setIsAuthenticated(true); navigate('dashboard'); setNotice('Connexion sécurisée réussie.')
-    } catch { setNotice('Le code Google Authenticator est incorrect ou expiré.') }
+      setIsAuthenticated(true); navigate('dashboard'); setNotice(t('notice.secureLogin'))
+    } catch { setNotice(t('notice.invalid2fa')) }
   }
 
   async function updateProfile(event: FormEvent<HTMLFormElement>) {
@@ -161,51 +189,52 @@ function App() {
     const data = new FormData(event.currentTarget)
     try {
       const updated = await api.updateAccount(String(data.get('firstName')), String(data.get('lastName')), String(data.get('email')))
-      setAccount(updated); setNotice('Vos informations personnelles sont enregistrées.')
-    } catch { setNotice('Impossible d’enregistrer le profil.') }
+      setAccount(updated); setNotice(t('notice.profileSaved'))
+    } catch { setNotice(t('notice.profileError')) }
   }
 
   async function updatePassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const data = new FormData(event.currentTarget)
-    try { await api.changePassword(String(data.get('currentPassword')), String(data.get('newPassword'))); event.currentTarget.reset(); setNotice('Votre mot de passe a été modifié.') }
-    catch { setNotice('Le mot de passe actuel est incorrect ou le nouveau mot de passe est invalide.') }
+    try { await api.changePassword(String(data.get('currentPassword')), String(data.get('newPassword'))); event.currentTarget.reset(); setNotice(t('notice.passwordSaved')) }
+    catch { setNotice(t('notice.passwordError')) }
   }
 
   async function setupTwoFactor() {
-    try { setTwoFactorSetup(await api.setupTwoFactor()) } catch { setNotice('Impossible de préparer la 2FA.') }
+    try { setTwoFactorSetup(await api.setupTwoFactor()) } catch { setNotice(t('notice.setup2faError')) }
   }
 
   async function enableTwoFactor(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const data = new FormData(event.currentTarget)
-    try { await api.enableTwoFactor(String(data.get('code'))); setAccount((current) => current ? { ...current, twoFactorEnabled: true } : current); setTwoFactorSetup(null); setNotice('Google Authenticator est activé.') }
-    catch { setNotice('Le code à six chiffres est incorrect.') }
+    try { await api.enableTwoFactor(String(data.get('code'))); setAccount((current) => current ? { ...current, twoFactorEnabled: true } : current); setTwoFactorSetup(null); setNotice(t('notice.twoFactorEnabled')) }
+    catch { setNotice(t('notice.invalidCode')) }
   }
 
   return (
-    <div className={`app-shell ${darkMode ? 'dark-mode' : ''}`}>
+    <div className={`app-shell ${darkMode ? 'dark-mode' : ''}`} lang={language} dir={language === 'ar' ? 'rtl' : 'ltr'}>
       <header className="topbar">
-        <button className="brand" onClick={() => navigate('home')} aria-label="Accueil TuniSign">
+        <button className="brand" onClick={() => navigate('home')} aria-label={`${t('nav.home')} TuniSign`}>
           <span className="brand-mark"><img src={tunisignLogo} alt="" /></span>
-          <span className="brand-title"><strong>TuniSign</strong><small>Langue des signes tunisienne</small></span>
+          <span className="brand-title"><strong>TuniSign</strong><small>{t('brand.subtitle')}</small></span>
         </button>
         <nav aria-label="Navigation principale">
-          <button className={page === 'home' ? 'active' : ''} onClick={() => navigate('home')}>Accueil</button>
-          <button className={page === 'catalogue' || page === 'practice' ? 'active' : ''} onClick={() => navigate('catalogue')}>Apprendre</button>
-          <button className={page === 'dashboard' || page === 'settings' ? 'active' : ''} onClick={() => navigate('dashboard')}>Mon espace</button>
+          <button className={page === 'home' ? 'active' : ''} onClick={() => navigate('home')}>{t('nav.home')}</button>
+          <button className={page === 'catalogue' || page === 'practice' ? 'active' : ''} onClick={() => navigate('catalogue')}>{t('nav.learn')}</button>
+          <button className={page === 'dashboard' || page === 'settings' ? 'active' : ''} onClick={() => navigate('dashboard')}>{t('nav.space')}</button>
         </nav>
         <div className="topbar-actions">
-          <button className="theme-button" onClick={toggleTheme} aria-label={darkMode ? 'Activer le mode clair' : 'Activer le mode sombre'}>{darkMode ? '☀️' : '🌙'}</button>
+          <label className="language-picker" aria-label="Language"><span>🌐</span><select value={language} onChange={(event) => setLanguage(event.target.value as Language)}><option value="fr">FR</option><option value="en">EN</option><option value="ar">عربي</option></select></label>
+          <button className="theme-button" onClick={toggleTheme} aria-label={darkMode ? t('theme.light') : t('theme.dark')}>{darkMode ? '☀️' : '🌙'}</button>
           {isAuthenticated ? (
-            <button className="ghost-button" onClick={logout}>Déconnexion</button>
+            <button className="ghost-button" onClick={logout}>{t('nav.logout')}</button>
           ) : (
-            <button className="primary-button compact" onClick={() => navigate('auth')}>Se connecter</button>
+            <button className="primary-button compact" onClick={() => navigate('auth')}>{t('nav.login')}</button>
           )}
         </div>
       </header>
 
-      {usesDemoData && <div className="status-banner">Mode démonstration : démarrez le backend pour afficher les données réelles.</div>}
+      {usesDemoData && <div className="status-banner">{t('demo.banner')}</div>}
       {notice && <div className="notice">{notice}</div>}
 
       {page === 'home' && (
@@ -214,56 +243,56 @@ function App() {
             <div className="hero-particles" aria-hidden="true"><i /><i /><i /><i /></div>
             <img className="hero-logo-watermark" src={tunisignLogo} alt="" aria-hidden="true" />
             <div className="hero-copy-wrap">
-              <p className="eyebrow hero-reveal hero-reveal-one">LANGUE DES SIGNES TUNISIENNE</p>
-              <h1 className="hero-reveal hero-reveal-two">{isAuthenticated ? `Prêt(e) à continuer${account ? `, ${account.firstName}` : ''} ?` : 'Apprendre, pratiquer, progresser.'}</h1>
-              <p className="hero-copy">{isAuthenticated ? 'Reprenez votre parcours, entraînez-vous devant la webcam et faites progresser votre score.' : 'TuniSign transforme l’apprentissage de la langue des signes tunisienne en une expérience visuelle, simple et motivante.'}</p>
+              <p className="eyebrow hero-reveal hero-reveal-one">{t('home.eyebrow')}</p>
+              <h1 className="hero-reveal hero-reveal-two">{isAuthenticated ? t('home.memberTitle', { name: account ? `${language === 'ar' ? '، ' : ', '}${account.firstName}` : '' }) : t('home.guestTitle')}</h1>
+              <p className="hero-copy">{isAuthenticated ? t('home.memberCopy') : t('home.guestCopy')}</p>
               <div className="hero-actions hero-reveal hero-reveal-three">
-                <button className="primary-button" onClick={() => navigate('catalogue')}>{isAuthenticated ? 'Continuer les leçons' : 'Découvrir les leçons'}</button>
+                <button className="primary-button" onClick={() => navigate('catalogue')}>{isAuthenticated ? t('home.continue') : t('home.discover')}</button>
                 {isAuthenticated ? (
-                  <button className="text-button" onClick={() => navigate('dashboard')}>Voir mon espace →</button>
+                  <button className="text-button" onClick={() => navigate('dashboard')}>{t('home.viewSpace')}</button>
                 ) : (
-                  <button className="text-button" onClick={() => { setIsRegistering(true); navigate('auth') }}>Créer un compte →</button>
+                  <button className="text-button" onClick={() => { setIsRegistering(true); navigate('auth') }}>{t('home.create')}</button>
                 )}
               </div>
             </div>
             <div className="hero-card hero-reveal hero-reveal-four" aria-label="Aperçu de la pratique">
-              <span className="live-indicator"><i /> EN DIRECT</span>
+              <span className="live-indicator"><i /> {t('home.live')}</span>
               <span className="mascot-hand" aria-hidden="true">🤟</span>
               <div className="mascot-spark spark-one">✦</div>
               <div className="mascot-spark spark-two">✦</div>
-              <p>{isAuthenticated ? 'Ton prochain objectif' : 'Pratique devant la webcam'}</p>
+              <p>{isAuthenticated ? t('home.nextGoal') : t('home.webcam')}</p>
               <strong>{isAuthenticated ? '01' : '87 %'}</strong>
-              <small>{isAuthenticated ? 'Leçon à commencer' : 'Score de précision'}</small>
-              <div className="streak-pill">{isAuthenticated ? '⚡ +20 XP à gagner' : '🔥 Série de 4 jours'}</div>
+              <small>{isAuthenticated ? t('home.lessonStart') : t('home.accuracy')}</small>
+              <div className="streak-pill">{isAuthenticated ? t('home.xpEarn') : t('home.streak')}</div>
             </div>
           </section>
           <section className="feature-grid">
-            <article><span>01</span><h2>Leçons guidées</h2><p>Des catégories utiles et des parcours progressifs.</p><b>Explorer →</b></article>
-            <article><span>02</span><h2>Correction visuelle</h2><p>Un retour immédiat pour améliorer chaque geste.</p><b>Pratiquer →</b></article>
-            <article><span>03</span><h2>Progression suivie</h2><p>Des recommandations adaptées à votre rythme.</p><b>Progresser →</b></article>
+            <article><span>01</span><h2>{t('feature.guided')}</h2><p>{t('feature.guidedCopy')}</p><b>{t('feature.explore')}</b></article>
+            <article><span>02</span><h2>{t('feature.visual')}</h2><p>{t('feature.visualCopy')}</p><b>{t('feature.practice')}</b></article>
+            <article><span>03</span><h2>{t('feature.progress')}</h2><p>{t('feature.progressCopy')}</p><b>{t('feature.advance')}</b></article>
           </section>
         </main>
       )}
 
       {page === 'catalogue' && (
         <main className="content-page">
-          <p className="eyebrow">PARCOURS D’APPRENTISSAGE</p>
-          <h1>Choisissez une catégorie</h1>
-          <p className="page-intro">Explorez les leçons et entraînez-vous signe par signe.</p>
+          <p className="eyebrow">{t('catalog.eyebrow')}</p>
+          <h1>{t('catalog.title')}</h1>
+          <p className="page-intro">{t('catalog.copy')}</p>
           <div className="category-row">
-            <button className={selectedCategory === null ? 'filter active' : 'filter'} onClick={() => setSelectedCategory(null)}>Toutes</button>
-            {categories.map((category) => <button key={category.id} className={selectedCategory === category.id ? 'filter active' : 'filter'} onClick={() => setSelectedCategory(category.id)}>{category.name}</button>)}
+            <button className={selectedCategory === null ? 'filter active' : 'filter'} onClick={() => setSelectedCategory(null)}>{t('catalog.all')}</button>
+            {categories.map((category) => <button key={category.id} className={selectedCategory === category.id ? 'filter active' : 'filter'} onClick={() => setSelectedCategory(category.id)}>{categoryLabel(category)}</button>)}
           </div>
-          {loading ? <p>Chargement des leçons…</p> : (
+          {loading ? <p>{t('catalog.loading')}</p> : (
             <section className="course-grid">
               {displayedCourses.map((course) => (
                 <article className="course-card" key={course.id}>
                   <div className="course-card-top"><div className="course-number">{String(course.id).padStart(2, '0')}</div><span className="course-xp">+20 XP</span></div>
                   <div className="lesson-orb" aria-hidden="true">🤟</div>
-                  <h2>{course.title}</h2>
-                  <p>{course.description || 'Une leçon pour progresser à votre rythme.'}</p>
-                  <div className="lesson-meta"><span>{signs.filter((sign) => sign.courseId === course.id).length || '—'} signes</span><span className="difficulty-dot">Débutant</span></div>
-                  <button className="lesson-start" onClick={() => startLesson(course)}>Commencer <span>→</span></button>
+                  <h2>{courseTitle(course)}</h2>
+                  <p>{courseCopy(course)}</p>
+                  <div className="lesson-meta"><span>{signs.filter((sign) => sign.courseId === course.id).length || '—'} {t('catalog.signs')}</span><span className="difficulty-dot">{t('catalog.beginner')}</span></div>
+                  <button className="lesson-start" onClick={() => startLesson(course)}>{t('catalog.start')} <span>→</span></button>
                 </article>
               ))}
             </section>
@@ -273,25 +302,25 @@ function App() {
 
       {page === 'practice' && selectedCourse && (
         <main className="practice-page">
-          <button className="back-button" onClick={() => navigate('catalogue')}>← Retour aux leçons</button>
+          <button className="back-button" onClick={() => navigate('catalogue')}>{t('practice.back')}</button>
           <section className="practice-layout">
             <div className="practice-stage">
-              <div className="stage-header"><span>LEÇON EN COURS</span><strong>1 / {Math.max(signs.filter((sign) => sign.courseId === selectedCourse.id).length, 1)}</strong></div>
+              <div className="stage-header"><span>{t('practice.current')}</span><strong>1 / {Math.max(signs.filter((sign) => sign.courseId === selectedCourse.id).length, 1)}</strong></div>
               <div className="practice-progress"><span /></div>
               <div className={`camera-stage ${practiceStatus}`}>
                 <div className="camera-grid" aria-hidden="true" /><span className="camera-corner corner-one" /><span className="camera-corner corner-two" /><span className="camera-corner corner-three" /><span className="camera-corner corner-four" />
                 <div className="sign-visual"><span>👋</span><i>✦</i><i>✦</i></div>
                 {practiceStatus === 'analyzing' && <div className="scanner-line" />}
-                <div className="camera-status"><i /> {practiceStatus === 'analyzing' ? 'ANALYSE IA EN COURS' : practiceStatus === 'ready' ? 'GESTE DÉTECTÉ' : 'CAMÉRA PRÊTE'}</div>
+                <div className="camera-status"><i /> {practiceStatus === 'analyzing' ? t('practice.analyzing') : practiceStatus === 'ready' ? t('practice.detected') : t('practice.cameraReady')}</div>
               </div>
-              <p className="eyebrow">REPRODUIS LE SIGNE</p>
-              <h1>{signs.find((sign) => sign.courseId === selectedCourse.id)?.word || selectedCourse.title}</h1>
-              <p>Place-toi devant la caméra quand tu es prêt(e). Tu recevras une correction visuelle en direct.</p>
-              <button className="primary-button practice-button" onClick={startAnalysis} disabled={practiceStatus === 'analyzing'}>{practiceStatus === 'analyzing' ? 'Analyse en cours…' : practiceStatus === 'ready' ? 'Relancer l’analyse' : 'Activer la caméra'}</button>
+              <p className="eyebrow">{t('practice.reproduce')}</p>
+              <h1>{signs.find((sign) => sign.courseId === selectedCourse.id)?.word || courseTitle(selectedCourse)}</h1>
+              <p>{t('practice.copy')}</p>
+              <button className="primary-button practice-button" onClick={startAnalysis} disabled={practiceStatus === 'analyzing'}>{practiceStatus === 'analyzing' ? t('practice.analyzingButton') : practiceStatus === 'ready' ? t('practice.retry') : t('practice.activate')}</button>
             </div>
             <aside className="practice-side">
               <div className="xp-badge">⚡ +20 XP</div>
-              {practiceStatus === 'ready' ? <><div className="score-ring" style={{ '--score': 87 } as CSSProperties}><strong>87%</strong><small>Excellent !</small></div><div className="analysis-checks"><p>✓ Position des mains</p><p>✓ Posture détectée</p><p>✓ Orientation stable</p></div><button className="primary-button compact" onClick={completeLesson}>Terminer la leçon →</button></> : <><h2>Ton objectif</h2><p>Reproduis le signe avec une précision de 80 % ou plus.</p><div className="tip-card"><span>💡</span><p>Regarde bien l’orientation de la main avant de commencer.</p></div></>}
+              {practiceStatus === 'ready' ? <><div className="score-ring" style={{ '--score': 87 } as CSSProperties}><strong>87%</strong><small>{t('practice.excellent')}</small></div><div className="analysis-checks"><p>{t('practice.handPosition')}</p><p>{t('practice.posture')}</p><p>{t('practice.orientation')}</p></div><button className="primary-button compact" onClick={completeLesson}>{t('practice.finish')}</button></> : <><h2>{t('practice.goal')}</h2><p>{t('practice.goalCopy')}</p><div className="tip-card"><span>💡</span><p>{t('practice.tip')}</p></div></>}
             </aside>
           </section>
         </main>
@@ -301,57 +330,57 @@ function App() {
         <main className="content-page">
           <section className="profile-hero">
             <div className="profile-avatar">{account ? `${account.firstName.slice(0, 1)}${account.lastName.slice(0, 1)}` : 'TS'}</div>
-            <div className="profile-summary"><p className="eyebrow">BON RETOUR</p><h1>{account ? `${account.firstName} ${account.lastName}` : 'Votre progression'}</h1><p>{account?.email || 'Connectez-vous pour enregistrer vos résultats et obtenir des recommandations.'}</p><div className="profile-tags"><span className="flame-tag">🔥 Série de {sessionStreak} jour{sessionStreak > 1 ? 's' : ''}</span><span>⚡ {sessionXp} XP</span><span>🛡️ Compte sécurisé</span></div></div>
-            {isAuthenticated && <button className="settings-button" onClick={() => navigate('settings')}>⚙️ Paramètres du compte</button>}
+            <div className="profile-summary"><p className="eyebrow">{t('dashboard.welcome')}</p><h1>{account ? `${account.firstName} ${account.lastName}` : t('dashboard.progress')}</h1><p>{account?.email || t('dashboard.loginCopy')}</p><div className="profile-tags"><span className="flame-tag">{t('dashboard.streak', { count: sessionStreak, plural: language === 'fr' && sessionStreak > 1 ? 's' : '' })}</span><span>⚡ {sessionXp} XP</span><span>{t('dashboard.secure')}</span></div></div>
+            {isAuthenticated && <button className="settings-button" onClick={() => navigate('settings')}>{t('dashboard.settings')}</button>}
           </section>
           <section className="dashboard-focus">
             <article className="continue-card">
-              <div><p className="eyebrow">🎥 CONTINUER</p><h2>{courses[0]?.title || 'Premier signe'}</h2><p>Reprenez la pratique et obtenez un retour visuel sur vos gestes.</p></div>
-              <div className="course-progress"><span><i /></span><b>{completedLessons ? 'Une leçon terminée' : 'Prêt à commencer'}</b></div>
-              <button className="primary-button compact" onClick={() => courses[0] && startLesson(courses[0])}>Continuer →</button>
+              <div><p className="eyebrow">{t('dashboard.continue')}</p><h2>{courses[0] ? courseTitle(courses[0]) : t('dashboard.firstSign')}</h2><p>{t('dashboard.continueCopy')}</p></div>
+              <div className="course-progress"><span><i /></span><b>{completedLessons ? t('dashboard.completedOne') : t('dashboard.ready')}</b></div>
+              <button className="primary-button compact" onClick={() => courses[0] && startLesson(courses[0])}>{t('dashboard.continueButton')}</button>
             </article>
-            <article className="challenge-card"><span className="challenge-orb">🎯</span><div><p className="eyebrow">CHALLENGE HEBDOMADAIRE</p><h2>Maîtriser 20 signes</h2><p>Une petite pratique par jour suffit.</p></div><div className="challenge-progress"><span style={{ width: `${Math.min(sessionXp / 2.5, 100)}%` }} /></div><small>{sessionXp} / 250 XP · Récompense : +250 XP</small></article>
+            <article className="challenge-card"><span className="challenge-orb">🎯</span><div><p className="eyebrow">{t('dashboard.challenge')}</p><h2>{t('dashboard.master')}</h2><p>{t('dashboard.daily')}</p></div><div className="challenge-progress"><span style={{ width: `${Math.min(sessionXp / 2.5, 100)}%` }} /></div><small>{t('dashboard.reward', { xp: sessionXp })}</small></article>
           </section>
           <section className="stats-grid">
-            <article><strong>{completedLessons}</strong><span>Leçons terminées</span></article>
-            <article><strong>{completedLessons ? '87' : '0'} %</strong><span>Précision moyenne</span></article>
-            <article><strong>{sessionXp}</strong><span>XP gagnés cette session</span></article>
+            <article><strong>{completedLessons}</strong><span>{t('dashboard.lessons')}</span></article>
+            <article><strong>{completedLessons ? '87' : '0'} %</strong><span>{t('dashboard.average')}</span></article>
+            <article><strong>{sessionXp}</strong><span>{t('dashboard.sessionXp')}</span></article>
           </section>
           <section className="learning-map-card">
-            <div className="map-heading"><div><p className="eyebrow">PARCOURS INTERACTIF</p><h2>Votre chemin d’apprentissage</h2></div><span>🏆 Objectif : niveau 1</span></div>
+            <div className="map-heading"><div><p className="eyebrow">{t('dashboard.path')}</p><h2>{t('dashboard.pathTitle')}</h2></div><span>{t('dashboard.levelGoal')}</span></div>
             <div className="learning-map">
-              {courses.slice(0, 4).map((course, index) => <button key={course.id} className={`map-node ${index < completedLessons ? 'completed' : index === Math.min(completedLessons, Math.max(courses.length - 1, 0)) ? 'current' : 'locked'}`} onClick={() => startLesson(course)} disabled={index > completedLessons}><i>{index < completedLessons ? '★' : index === completedLessons ? '✦' : '🔒'}</i><span>{course.title}</span></button>)}
+              {courses.slice(0, 4).map((course, index) => <button key={course.id} className={`map-node ${index < completedLessons ? 'completed' : index === Math.min(completedLessons, Math.max(courses.length - 1, 0)) ? 'current' : 'locked'}`} onClick={() => startLesson(course)} disabled={index > completedLessons}><i>{index < completedLessons ? '★' : index === completedLessons ? '✦' : '🔒'}</i><span>{courseTitle(course)}</span></button>)}
             </div>
           </section>
-          <article className="recommendation"><span>✦</span><div><h2>Recommandation</h2><p>Commencez par la catégorie « Salutations » et entraînez-vous régulièrement.</p></div><button className="primary-button compact" onClick={() => navigate('catalogue')}>Voir les leçons</button></article>
+          <article className="recommendation"><span>✦</span><div><h2>{t('dashboard.recommendation')}</h2><p>{t('dashboard.recommendationCopy')}</p></div><button className="primary-button compact" onClick={() => navigate('catalogue')}>{t('dashboard.viewLessons')}</button></article>
         </main>
       )}
 
       {page === 'settings' && (
         <main className="content-page settings-page">
-          <button className="back-button" onClick={() => navigate('dashboard')}>← Retour à mon espace</button>
-          <div className="section-heading"><div><p className="eyebrow">PARAMÈTRES DU COMPTE</p><h2>Mon profil et ma sécurité</h2></div>{account && <div className="account-avatar">{account.firstName.slice(0, 1)}{account.lastName.slice(0, 1)}</div>}</div>
+          <button className="back-button" onClick={() => navigate('dashboard')}>{t('settings.back')}</button>
+          <div className="section-heading"><div><p className="eyebrow">{t('settings.eyebrow')}</p><h2>{t('settings.title')}</h2></div>{account && <div className="account-avatar">{account.firstName.slice(0, 1)}{account.lastName.slice(0, 1)}</div>}</div>
           {account ? <div className="account-grid">
-              <form className="account-card" onSubmit={updateProfile}><h3>Informations personnelles</h3><p>Modifiez vos informations de connexion.</p><div className="form-row"><label>Prénom<input name="firstName" defaultValue={account.firstName} required /></label><label>Nom<input name="lastName" defaultValue={account.lastName} required /></label></div><label>E-mail<input name="email" type="email" defaultValue={account.email} required /></label><button className="primary-button compact" type="submit">Enregistrer</button></form>
-              <form className="account-card" onSubmit={updatePassword}><h3>Mot de passe</h3><p>Choisissez un mot de passe robuste.</p><label>Mot de passe actuel<input name="currentPassword" type="password" required /></label><label>Nouveau mot de passe<input name="newPassword" type="password" minLength={8} required /></label><button className="primary-button compact" type="submit">Modifier le mot de passe</button></form>
-              <article className="account-card two-factor-card"><div className="two-factor-title"><span>🔐</span><div><h3>Google Authenticator</h3><p>{account.twoFactorEnabled ? '2FA activée : votre compte est protégé.' : 'Ajoutez une seconde protection à votre compte.'}</p></div></div>{!account.twoFactorEnabled && !twoFactorSetup && <button className="primary-button compact" onClick={setupTwoFactor}>Configurer la 2FA</button>}{twoFactorSetup && <form className="two-factor-setup" onSubmit={enableTwoFactor}><p>Dans Google Authenticator, ajoutez une clé de configuration manuelle :</p><code>{twoFactorSetup.secret}</code><small>Compte : {account.email} · Type : Basé sur l’heure</small><label>Code à six chiffres<input name="code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} placeholder="123456" required /></label><button className="primary-button compact" type="submit">Vérifier et activer</button></form>}</article>
+              <form className="account-card" onSubmit={updateProfile}><h3>{t('settings.personal')}</h3><p>{t('settings.personalCopy')}</p><div className="form-row"><label>{t('settings.firstName')}<input name="firstName" defaultValue={account.firstName} required /></label><label>{t('settings.lastName')}<input name="lastName" defaultValue={account.lastName} required /></label></div><label>{t('settings.email')}<input name="email" type="email" defaultValue={account.email} required /></label><button className="primary-button compact" type="submit">{t('settings.save')}</button></form>
+              <form className="account-card" onSubmit={updatePassword}><h3>{t('settings.password')}</h3><p>{t('settings.passwordCopy')}</p><label>{t('settings.currentPassword')}<input name="currentPassword" type="password" required /></label><label>{t('settings.newPassword')}<input name="newPassword" type="password" minLength={8} required /></label><button className="primary-button compact" type="submit">{t('settings.changePassword')}</button></form>
+              <article className="account-card two-factor-card"><div className="two-factor-title"><span>🔐</span><div><h3>Google Authenticator</h3><p>{account.twoFactorEnabled ? t('settings.twoFactorOn') : t('settings.twoFactorOff')}</p></div></div>{!account.twoFactorEnabled && !twoFactorSetup && <button className="primary-button compact" onClick={setupTwoFactor}>{t('settings.configure2fa')}</button>}{twoFactorSetup && <form className="two-factor-setup" onSubmit={enableTwoFactor}><p>{t('settings.manualKey')}</p><code>{twoFactorSetup.secret}</code><small>{t('settings.account')} : {account.email} · {t('settings.timeBased')}</small><label>{t('settings.sixDigit')}<input name="code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} placeholder="123456" required /></label><button className="primary-button compact" type="submit">{t('settings.enable2fa')}</button></form>}</article>
             </div>
-          : <p>Chargement de votre profil…</p>}
+          : <p>{t('settings.loading')}</p>}
         </main>
       )}
 
       {page === 'auth' && (
         <main className="auth-page">
           <section className="auth-card">
-            <p className="eyebrow">{isRegistering ? 'NOUVEAU COMPTE' : 'BON RETOUR'}</p>
-            <h1>{isRegistering ? 'Rejoindre TuniSign' : 'Se connecter'}</h1>
+            <p className="eyebrow">{isRegistering ? t('auth.new') : t('auth.return')}</p>
+            <h1>{isRegistering ? t('auth.join') : t('auth.login')}</h1>
             <form onSubmit={submitAuth}>
-              {isRegistering && <div className="form-row"><label>Prénom<input required name="firstName" /></label><label>Nom<input required name="lastName" /></label></div>}
-              <label>E-mail<input required type="email" name="email" placeholder="nom@exemple.com" /></label>
-              <label>Mot de passe<input required minLength={6} type="password" name="password" placeholder="Minimum 6 caractères" /></label>
-              <button className="primary-button" type="submit">{isRegistering ? 'Créer mon compte' : 'Connexion'}</button>
+              {isRegistering && <div className="form-row"><label>{t('settings.firstName')}<input required name="firstName" /></label><label>{t('settings.lastName')}<input required name="lastName" /></label></div>}
+              <label>{t('auth.email')}<input required type="email" name="email" placeholder="nom@exemple.com" /></label>
+              <label>{t('auth.password')}<input required minLength={6} type="password" name="password" placeholder={t('auth.passwordPlaceholder')} /></label>
+              <button className="primary-button" type="submit">{isRegistering ? t('auth.create') : t('auth.connection')}</button>
             </form>
-            <button className="text-button" onClick={() => setIsRegistering(!isRegistering)}>{isRegistering ? 'J’ai déjà un compte' : 'Créer un compte'}</button>
+            <button className="text-button" onClick={() => setIsRegistering(!isRegistering)}>{isRegistering ? t('auth.haveAccount') : t('auth.createAccount')}</button>
           </section>
         </main>
       )}
@@ -360,21 +389,21 @@ function App() {
         <main className="auth-page">
           <section className="auth-card two-factor-login">
             <div className="security-icon">🔐</div>
-            <p className="eyebrow">VÉRIFICATION DE SÉCURITÉ</p>
-            <h1>Confirme ton identité</h1>
-            <p>Ouvre Google Authenticator et saisis le code temporaire à six chiffres pour <strong>{pendingTwoFactorEmail}</strong>.</p>
+            <p className="eyebrow">{t('twoFactor.eyebrow')}</p>
+            <h1>{t('twoFactor.title')}</h1>
+            <p>{t('twoFactor.copy')} <strong>{pendingTwoFactorEmail}</strong>.</p>
             <form onSubmit={verifyTwoFactor}>
-              <label>Code Google Authenticator<input name="code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} placeholder="123456" autoFocus required /></label>
-              <button className="primary-button" type="submit">Vérifier le code</button>
+              <label>{t('twoFactor.code')}<input name="code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} placeholder="123456" autoFocus required /></label>
+              <button className="primary-button" type="submit">{t('twoFactor.verify')}</button>
             </form>
-            <button className="text-button" onClick={() => navigate('auth')}>← Retour à la connexion</button>
+            <button className="text-button" onClick={() => navigate('auth')}>{t('twoFactor.back')}</button>
           </section>
         </main>
       )}
 
       {celebrationOpen && <div className="celebration-overlay" role="dialog" aria-modal="true" aria-label="Leçon terminée">
         <div className="confetti" aria-hidden="true"><i /><i /><i /><i /><i /><i /></div>
-        <section className="celebration-card"><span className="celebration-medal">🏆</span><p className="eyebrow">NOUVELLE ÉTAPE</p><h1>Bravo !</h1><p>Leçon terminée. Votre progression vient d’avancer.</p><strong>+20 XP</strong><div className="celebration-stars" aria-label="Trois étoiles">★ ★ ★</div><button className="primary-button" onClick={() => { setCelebrationOpen(false); navigate('dashboard') }}>Voir ma progression →</button></section>
+        <section className="celebration-card"><span className="celebration-medal">🏆</span><p className="eyebrow">{t('celebration.eyebrow')}</p><h1>{t('celebration.title')}</h1><p>{t('celebration.copy')}</p><strong>+20 XP</strong><div className="celebration-stars" aria-label="Trois étoiles">★ ★ ★</div><button className="primary-button" onClick={() => { setCelebrationOpen(false); navigate('dashboard') }}>{t('celebration.view')}</button></section>
       </div>}
     </div>
   )
