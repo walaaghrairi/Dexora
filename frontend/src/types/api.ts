@@ -34,3 +34,11 @@ export type Account = {
 }
 
 export type TwoFactorSetup = { secret: string; otpAuthUri: string }
+
+export type SignPrediction = {
+  label: string
+  confidence: number
+  topPredictions: Array<{ label: string; confidence: number }>
+  model: string
+  inputShape: number[]
+}

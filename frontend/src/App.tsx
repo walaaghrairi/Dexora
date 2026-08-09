@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, FormEvent } from 'react'
 import { api } from './services/api'
-import type { Account, Category, Course, Sign, TwoFactorSetup } from './types/api'
+import type { Account, Category, Course, Sign, SignPrediction, TwoFactorSetup } from './types/api'
 import tunisignLogo from './assets/tunisign-sina-logo.png'
 import { translate, type Language, type TranslationKey } from './i18n'
 
@@ -38,6 +38,10 @@ function App() {
   const [pendingTwoFactorEmail, setPendingTwoFactorEmail] = useState('')
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('tunisign_theme') === 'dark')
   const [practiceStatus, setPracticeStatus] = useState<PracticeStatus>('idle')
+  const [cameraActive, setCameraActive] = useState(false)
+  const [prediction, setPrediction] = useState<SignPrediction | null>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const streamRef = useRef<MediaStream | null>(null)
   const [celebrationOpen, setCelebrationOpen] = useState(false)
   const [sessionXp, setSessionXp] = useState(0)
   const [completedLessons, setCompletedLessons] = useState(0)
@@ -101,6 +105,19 @@ function App() {
     }
   }, [account?.id])
 
+  useEffect(() => {
+    if (page === 'practice') return
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+    setCameraActive(false)
+    setPrediction(null)
+    setPracticeStatus('idle')
+  }, [page])
+
+  useEffect(() => () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+  }, [])
+
   const displayedCourses = useMemo(
     () => selectedCategory === null ? courses : courses.filter((course) => course.categoryId === selectedCategory),
     [courses, selectedCategory],
@@ -142,6 +159,7 @@ function App() {
   function startLesson(course: Course) {
     setSelectedCourse(course)
     setPracticeStatus('idle')
+    setPrediction(null)
     navigate('practice')
   }
 
@@ -153,13 +171,58 @@ function App() {
     })
   }
 
-  function startAnalysis() {
+  async function startAnalysis() {
+    if (!cameraActive) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+          audio: false,
+        })
+        streamRef.current = stream
+        setCameraActive(true)
+        setPrediction(null)
+        setNotice(t('notice.cameraReady'))
+        window.setTimeout(() => {
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream
+            void videoRef.current.play()
+          }
+        })
+      } catch {
+        setNotice(t('notice.cameraError'))
+      }
+      return
+    }
+
+    const video = videoRef.current
+    if (!video || !video.videoWidth || !video.videoHeight) {
+      setNotice(t('notice.cameraWait'))
+      return
+    }
+
     setPracticeStatus('analyzing')
+    setPrediction(null)
     setNotice(t('notice.analysis'))
-    window.setTimeout(() => {
+    try {
+      const canvas = document.createElement('canvas')
+      canvas.width = video.videoWidth
+      canvas.height = video.videoHeight
+      const context = canvas.getContext('2d')
+      if (!context) throw new Error('Canvas indisponible')
+      context.translate(canvas.width, 0)
+      context.scale(-1, 1)
+      context.drawImage(video, 0, 0, canvas.width, canvas.height)
+      const image = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Capture impossible')), 'image/jpeg', 0.92)
+      })
+      const result = await api.predictSign(image)
+      setPrediction(result)
       setPracticeStatus('ready')
-      setNotice(t('notice.analysisReady'))
-    }, 1500)
+      setNotice(t('notice.analysisReady', { label: result.label }))
+    } catch (error) {
+      setPracticeStatus('idle')
+      setNotice(error instanceof Error ? error.message : t('notice.analysisError'))
+    }
   }
 
   function completeLesson() {
@@ -255,6 +318,13 @@ function App() {
     try { await api.enableTwoFactor(String(data.get('code'))); setAccount((current) => current ? { ...current, twoFactorEnabled: true } : current); setTwoFactorSetup(null); setNotice(t('notice.twoFactorEnabled')) }
     catch { setNotice(t('notice.invalidCode')) }
   }
+
+  const predictionScore = prediction ? Math.round(prediction.confidence * 100) : 0
+  const expectedLabel = activePracticeSign?.modelLabel?.trim() || ''
+  const predictionMatches = Boolean(prediction) && (
+    !expectedLabel || prediction!.label.toLocaleLowerCase() === expectedLabel.toLocaleLowerCase()
+  )
+  const predictionAccepted = predictionMatches && predictionScore >= 60
 
   return (
     <div className={`app-shell ${darkMode ? 'dark-mode' : ''}`} lang={language} dir={language === 'ar' ? 'rtl' : 'ltr'}>
@@ -355,18 +425,19 @@ function App() {
               <div className="practice-progress"><span style={{ width: `${Math.max(8, (selectedCourseEarned / badgeTotal(selectedCourse)) * 100)}%` }} /></div>
               <div className={`camera-stage ${practiceStatus}`}>
                 <div className="camera-grid" aria-hidden="true" /><span className="camera-corner corner-one" /><span className="camera-corner corner-two" /><span className="camera-corner corner-three" /><span className="camera-corner corner-four" />
-                <div className="sign-visual"><span>👋</span><i>✦</i><i>✦</i></div>
+                {cameraActive ? <video ref={videoRef} className="camera-video" autoPlay muted playsInline /> : <div className="sign-visual"><span>👋</span><i>✦</i><i>✦</i></div>}
                 {practiceStatus === 'analyzing' && <div className="scanner-line" />}
-                <div className="camera-status"><i /> {practiceStatus === 'analyzing' ? t('practice.analyzing') : practiceStatus === 'ready' ? t('practice.detected') : t('practice.cameraReady')}</div>
+                <div className="camera-status"><i /> {practiceStatus === 'analyzing' ? t('practice.analyzing') : practiceStatus === 'ready' ? t('practice.detected') : cameraActive ? t('practice.cameraActive') : t('practice.cameraReady')}</div>
               </div>
               <p className="eyebrow">{t('practice.reproduce')}</p>
               <h1>{activePracticeSign?.word || `${courseTitle(selectedCourse)} · ${selectedCourseEarned + 1}`}</h1>
               <p>{t('practice.copy')}</p>
-              <button className="primary-button practice-button" onClick={startAnalysis} disabled={practiceStatus === 'analyzing'}>{practiceStatus === 'analyzing' ? t('practice.analyzingButton') : practiceStatus === 'ready' ? t('practice.retry') : t('practice.activate')}</button>
+              <button className="primary-button practice-button" onClick={startAnalysis} disabled={practiceStatus === 'analyzing'}>{practiceStatus === 'analyzing' ? t('practice.analyzingButton') : cameraActive ? t('practice.capture') : t('practice.activate')}</button>
+              <small className="model-notice">{t('practice.modelNotice')}</small>
             </div>
             <aside className="practice-side">
               <div className="xp-badge">⚡ +20 XP</div>
-              {practiceStatus === 'ready' ? <><div className="score-ring" style={{ '--score': 87 } as CSSProperties}><strong>87%</strong><small>{t('practice.excellent')}</small></div><div className="analysis-checks"><p>{t('practice.handPosition')}</p><p>{t('practice.posture')}</p><p>{t('practice.orientation')}</p></div><button className="primary-button compact" onClick={completeLesson}>{t('practice.finish')}</button></> : <><h2>{t('practice.goal')}</h2><p>{t('practice.goalCopy')}</p><div className="tip-card"><span>💡</span><p>{t('practice.tip')}</p></div></>}
+              {practiceStatus === 'ready' && prediction ? <><div className="score-ring" style={{ '--score': predictionScore } as CSSProperties}><strong>{predictionScore}%</strong><small>{t('practice.confidence')}</small></div><div className="analysis-checks"><p>{t('practice.predicted')} : <b>{prediction.label}</b></p>{expectedLabel && <p>{t('practice.expected')} : <b>{expectedLabel}</b></p>}<p className={predictionAccepted ? 'prediction-ok' : 'prediction-retry'}>{predictionAccepted ? t('practice.correct') : t('practice.incorrect')}</p></div>{predictionAccepted ? <button className="primary-button compact" onClick={completeLesson}>{t('practice.finish')}</button> : <p className="retry-advice">{t('practice.retryAdvice')}</p>}</> : <><h2>{t('practice.goal')}</h2><p>{t('practice.goalCopy')}</p><div className="tip-card"><span>💡</span><p>{t('practice.tip')}</p></div></>}
             </aside>
           </section>
         </main>
