@@ -118,6 +118,19 @@ function App() {
     streamRef.current?.getTracks().forEach((track) => track.stop())
   }, [])
 
+  useEffect(() => {
+    const video = videoRef.current
+    const stream = streamRef.current
+    if (!cameraActive || !video || !stream) return
+
+    video.srcObject = stream
+    const playVideo = () => void video.play().catch(() => setNotice(translate(language, 'notice.cameraError')))
+    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) playVideo()
+    else video.addEventListener('loadedmetadata', playVideo, { once: true })
+
+    return () => video.removeEventListener('loadedmetadata', playVideo)
+  }, [cameraActive, language])
+
   const displayedCourses = useMemo(
     () => selectedCategory === null ? courses : courses.filter((course) => course.categoryId === selectedCategory),
     [courses, selectedCategory],
@@ -182,12 +195,6 @@ function App() {
         setCameraActive(true)
         setPrediction(null)
         setNotice(t('notice.cameraReady'))
-        window.setTimeout(() => {
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream
-            void videoRef.current.play()
-          }
-        })
       } catch {
         setNotice(t('notice.cameraError'))
       }
