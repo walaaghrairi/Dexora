@@ -60,7 +60,12 @@ function App() {
   const [finalTestSigns, setFinalTestSigns] = useState<Sign[]>([])
   const [finalTestIndex, setFinalTestIndex] = useState(0)
   const [failedAttempts, setFailedAttempts] = useState(0)
+  const [reminderCycles, setReminderCycles] = useState(0)
   const [gestureReminderOpen, setGestureReminderOpen] = useState(false)
+  const [learningQueue, setLearningQueue] = useState<Sign[]>([])
+  const [previousMasteredSign, setPreviousMasteredSign] = useState<Sign | null>(null)
+  const [recoveryReviewSign, setRecoveryReviewSign] = useState<Sign | null>(null)
+  const [showAsConfusionHint, setShowAsConfusionHint] = useState(false)
   const [cameraActive, setCameraActive] = useState(false)
   const [prediction, setPrediction] = useState<SignPrediction | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -170,7 +175,8 @@ function App() {
     : []
   const selectedCourseEarned = selectedCourse ? courseBadgeProgress[selectedCourse.id] ?? 0 : 0
   const selectedCourseComplete = selectedCourse ? selectedCourseEarned >= badgeTotal(selectedCourse) : false
-  const activePracticeSign = selectedCourseSigns[Math.min(selectedCourseEarned, Math.max(selectedCourseSigns.length - 1, 0))]
+  const fallbackPracticeSign = selectedCourseSigns[Math.min(selectedCourseEarned, Math.max(selectedCourseSigns.length - 1, 0))]
+  const activePracticeSign = recoveryReviewSign || learningQueue[0] || fallbackPracticeSign
   const targetPracticeSign = practiceMode === 'quiz' ? quizSign : activePracticeSign
 
   useEffect(() => {
@@ -178,7 +184,9 @@ function App() {
     recentPredictionsRef.current = []
     autoRecognitionPausedRef.current = false
     setFailedAttempts(0)
+    setReminderCycles(0)
     setGestureReminderOpen(false)
+    setShowAsConfusionHint(false)
     setPrediction(null)
     if (cameraActive && practiceMode !== 'learn') setPracticeStatus('analyzing')
   }, [cameraActive, practiceMode, targetPracticeSign?.id, targetPracticeSign?.modelLabel])
@@ -231,9 +239,15 @@ function App() {
       setPracticeStatus('ready')
       const matchesExpected = !expectedLabelRef.current
         || result.label.toLocaleLowerCase() === expectedLabelRef.current
+      const normalizedPrediction = result.label.trim().toLocaleLowerCase()
+      const isAsConfusion = (expectedLabelRef.current === 'a' && normalizedPrediction === 's')
+        || (expectedLabelRef.current === 's' && normalizedPrediction === 'a')
+      setShowAsConfusionHint(isAsConfusion)
       if (matchesExpected && averageConfidence >= ACCEPTANCE_CONFIDENCE) {
         autoRecognitionPausedRef.current = true
         setFailedAttempts(0)
+        setReminderCycles(0)
+        setShowAsConfusionHint(false)
         setNotice(translate(language, 'notice.autoDetected', {
           label: result.label,
           score: Math.round(averageConfidence * 100),
@@ -243,6 +257,7 @@ function App() {
           const next = current + 1
           if (next >= 6) {
             autoRecognitionPausedRef.current = true
+            setReminderCycles((cycles) => Math.min(cycles + 1, 3))
             setGestureReminderOpen(true)
             setNotice(translate(language, 'notice.gestureReminder'))
           }
@@ -296,13 +311,22 @@ function App() {
   }
 
   function startLesson(course: Course) {
+    const orderedSigns = signs
+      .filter((sign) => sign.courseId === course.id)
+      .sort((a, b) => a.modelLabel.localeCompare(b.modelLabel))
+    const earned = courseBadgeProgress[course.id] ?? 0
     setSelectedCourse(course)
+    setLearningQueue(orderedSigns.slice(earned))
+    setPreviousMasteredSign(earned > 0 ? orderedSigns[earned - 1] : null)
+    setRecoveryReviewSign(null)
     setPracticeMode('learn')
     setQuizSign(null)
     setFinalTestSigns([])
     setFinalTestIndex(0)
     setFailedAttempts(0)
+    setReminderCycles(0)
     setGestureReminderOpen(false)
+    setShowAsConfusionHint(false)
     setPracticeStatus('idle')
     setPrediction(null)
     navigate('practice')
@@ -338,6 +362,17 @@ function App() {
 
   function finishPracticeStep() {
     if (!selectedCourse) return
+    if (recoveryReviewSign) {
+      setRecoveryReviewSign(null)
+      setPracticeMode('learn')
+      setPrediction(null)
+      setPracticeStatus('idle')
+      setFailedAttempts(0)
+      setReminderCycles(0)
+      setShowAsConfusionHint(false)
+      setNotice(t('notice.reviewCompleted'))
+      return
+    }
     const isLastLetter = selectedCourseEarned + 1 >= badgeTotal(selectedCourse)
     if (isLastLetter) beginFinalTest()
     else completeLesson()
@@ -356,17 +391,44 @@ function App() {
     setPrediction(null)
     setPracticeStatus('analyzing')
     setFailedAttempts(0)
+    setReminderCycles(0)
     setGestureReminderOpen(false)
   }
 
   function resumeAfterReminder() {
+    if (reminderCycles >= 3) {
+      if (practiceMode === 'quiz') {
+        setFinalTestSigns((current) => {
+          const reordered = [...current]
+          const [difficultSign] = reordered.splice(finalTestIndex, 1)
+          if (difficultSign) reordered.push(difficultSign)
+          setQuizSign(reordered[finalTestIndex] || difficultSign || null)
+          return reordered
+        })
+        setNotice(t('notice.testLetterDeferred'))
+      } else if (activePracticeSign) {
+        const difficultSign = activePracticeSign
+        setLearningQueue((current) => {
+          const remaining = current.filter((sign) => sign.id !== difficultSign.id)
+          return [...remaining, difficultSign]
+        })
+        setRecoveryReviewSign(previousMasteredSign)
+        setPracticeMode('learn')
+        setNotice(previousMasteredSign
+          ? t('notice.letterDeferredWithReview', { difficult: difficultSign.modelLabel, previous: previousMasteredSign.modelLabel })
+          : t('notice.letterDeferred', { difficult: difficultSign.modelLabel }))
+      }
+      setReminderCycles(0)
+    } else {
+      setNotice(t('notice.analysisResumed'))
+    }
     recentPredictionsRef.current = []
     autoRecognitionPausedRef.current = false
     setPrediction(null)
-    setPracticeStatus('analyzing')
+    setPracticeStatus(practiceMode === 'quiz' || reminderCycles < 3 ? 'analyzing' : 'idle')
     setFailedAttempts(0)
     setGestureReminderOpen(false)
-    setNotice(t('notice.analysisResumed'))
+    setShowAsConfusionHint(false)
   }
 
   function toggleTheme() {
@@ -415,13 +477,20 @@ function App() {
       setSessionStreak((current) => current + 1)
     }
 
+    if (activePracticeSign && !recoveryReviewSign) {
+      setPreviousMasteredSign(activePracticeSign)
+      setLearningQueue((current) => current.filter((sign) => sign.id !== activePracticeSign.id))
+    }
+
     setRewardType(nextBadges >= totalBadges ? 'certificate' : 'badge')
     setPracticeMode('learn')
     setQuizSign(null)
     setFinalTestSigns([])
     setFinalTestIndex(0)
     setFailedAttempts(0)
+    setReminderCycles(0)
     setGestureReminderOpen(false)
+    setShowAsConfusionHint(false)
     setPrediction(null)
     setPracticeStatus('idle')
     setCelebrationOpen(true)
@@ -607,7 +676,7 @@ function App() {
               <div className="practice-progress"><span style={{ width: `${Math.max(8, (selectedCourseEarned / badgeTotal(selectedCourse)) * 100)}%` }} /></div>
               {practiceMode === 'learn' ? <>
                 <div className="reference-stage">
-                  <span className="step-pill">{t('practice.stepObserve')}</span>
+                  <span className="step-pill">{recoveryReviewSign ? t('practice.recoveryStep') : t('practice.stepObserve')}</span>
                   <div className="reference-letter">{targetPracticeSign?.modelLabel}</div>
                   {targetPracticeSign?.imageUrl && <img src={targetPracticeSign.imageUrl} alt={t('practice.referenceAlt', { label: targetPracticeSign.modelLabel })} onError={(event) => event.currentTarget.remove()} />}
                   <strong>{targetPracticeSign?.modelLabel}</strong>
@@ -615,7 +684,7 @@ function App() {
                 <p className="eyebrow">{t('practice.observe')}</p>
                 <h1>{targetPracticeSign?.word || `${courseTitle(selectedCourse)} · ${selectedCourseEarned + 1}`}</h1>
                 <p>{targetPracticeSign?.description || t('practice.observeCopy')}</p>
-                <button className="primary-button practice-button" onClick={beginPractice}>{t('practice.readyToRepeat')}</button>
+                <button className="primary-button practice-button" onClick={beginPractice}>{recoveryReviewSign ? t('practice.recoveryReady') : t('practice.readyToRepeat')}</button>
               </> : <>
                 <div className={`camera-stage ${practiceStatus}`}>
                   <div className="camera-grid" aria-hidden="true" /><span className="camera-corner corner-one" /><span className="camera-corner corner-two" /><span className="camera-corner corner-three" /><span className="camera-corner corner-four" />
@@ -629,16 +698,17 @@ function App() {
                 <p>{practiceMode === 'quiz' ? t('practice.quizCopy') : t('practice.copy')}</p>
                 <button className="primary-button practice-button" onClick={startAnalysis} disabled={cameraActive}>{cameraActive ? t('practice.autoActive') : t('practice.activate')}</button>
                 {failedAttempts > 0 && <small className="attempt-counter">{t('practice.attemptCounter', { count: failedAttempts })}</small>}
+                {showAsConfusionHint && <div className="confusion-hint"><span>👀</span><p>{t('practice.asConfusionHint')}</p></div>}
                 <small className="model-notice">{t('practice.modelNotice')}</small>
               </>}
             </div>
             <aside className="practice-side">
               <div className="xp-badge">⚡ +20 XP</div>
-              {practiceMode === 'learn' ? <div className="lesson-steps"><h2>{t('practice.methodTitle')}</h2><p><b>1</b>{t('practice.methodObserve')}</p><p><b>2</b>{t('practice.methodRepeat')}</p><p><b>3</b>{t('practice.methodTest')}</p></div> : practiceStatus === 'ready' && prediction ? <><div className="score-ring" style={{ '--score': predictionScore } as CSSProperties}><strong>{predictionScore}%</strong><small>{t('practice.confidence')}</small></div><div className="analysis-checks"><p>{t('practice.predicted')} : <b>{prediction.label}</b></p>{expectedLabel && <p>{t('practice.expected')} : <b>{expectedLabel}</b></p>}<p className={predictionAccepted ? 'prediction-ok' : 'prediction-retry'}>{predictionAccepted ? t('practice.correct') : t('practice.incorrect')}</p></div>{predictionAccepted ? <button className="primary-button compact" onClick={practiceMode === 'quiz' ? advanceFinalTest : finishPracticeStep}>{practiceMode === 'quiz' ? isLastFinalTestSign ? t('practice.validateCourse') : t('practice.nextTestLetter') : isLastPracticeLetter ? t('practice.startFinalTest') : t('practice.finish')}</button> : <p className="retry-advice">{t('practice.retryAdvice')}</p>}</> : <><h2>{practiceMode === 'quiz' ? t('practice.finalTestTitle') : t('practice.goal')}</h2><p>{practiceMode === 'quiz' ? t('practice.finalTestGoal') : t('practice.goalCopy')}</p><div className="tip-card"><span>💡</span><p>{t('practice.tip')}</p></div></>}
+              {practiceMode === 'learn' ? <div className="lesson-steps"><h2>{t('practice.methodTitle')}</h2><p><b>1</b>{t('practice.methodObserve')}</p><p><b>2</b>{t('practice.methodRepeat')}</p><p><b>3</b>{t('practice.methodTest')}</p></div> : practiceStatus === 'ready' && prediction ? <><div className="score-ring" style={{ '--score': predictionScore } as CSSProperties}><strong>{predictionScore}%</strong><small>{t('practice.confidence')}</small></div><div className="analysis-checks"><p>{t('practice.predicted')} : <b>{prediction.label}</b></p>{expectedLabel && <p>{t('practice.expected')} : <b>{expectedLabel}</b></p>}<p className={predictionAccepted ? 'prediction-ok' : 'prediction-retry'}>{predictionAccepted ? t('practice.correct') : t('practice.incorrect')}</p></div>{predictionAccepted ? <button className="primary-button compact" onClick={practiceMode === 'quiz' ? advanceFinalTest : finishPracticeStep}>{practiceMode === 'quiz' ? isLastFinalTestSign ? t('practice.validateCourse') : t('practice.nextTestLetter') : recoveryReviewSign ? t('practice.recoveryReady') : isLastPracticeLetter ? t('practice.startFinalTest') : t('practice.finish')}</button> : <p className="retry-advice">{t('practice.retryAdvice')}</p>}</> : <><h2>{practiceMode === 'quiz' ? t('practice.finalTestTitle') : t('practice.goal')}</h2><p>{practiceMode === 'quiz' ? t('practice.finalTestGoal') : t('practice.goalCopy')}</p><div className="tip-card"><span>💡</span><p>{t('practice.tip')}</p></div></>}
             </aside>
           </section>
           {gestureReminderOpen && targetPracticeSign && <div className="gesture-reminder-overlay" role="dialog" aria-modal="true" aria-label={t('practice.reminderTitle')}>
-            <section className="gesture-reminder-card"><p className="eyebrow">{t('practice.reminderEyebrow')}</p><h2>{t('practice.reminderTitle')}</h2><p>{t('practice.reminderCopy', { count: 6 })}</p><div className="reminder-gesture"><div className="reference-letter">{targetPracticeSign.modelLabel}</div>{targetPracticeSign.imageUrl && <img src={targetPracticeSign.imageUrl} alt={t('practice.referenceAlt', { label: targetPracticeSign.modelLabel })} onError={(event) => event.currentTarget.remove()} />}</div><strong>{t('practice.reminderLabel', { label: targetPracticeSign.modelLabel })}</strong><button className="primary-button" onClick={resumeAfterReminder}>{t('practice.resume')}</button></section>
+            <section className="gesture-reminder-card"><p className="eyebrow">{t('practice.reminderEyebrow')} · {t('practice.reminderCycle', { current: reminderCycles })}</p><h2>{t('practice.reminderTitle')}</h2><p>{t('practice.reminderCopy', { count: 6 })}</p><div className="reminder-gesture"><div className="reference-letter">{targetPracticeSign.modelLabel}</div>{targetPracticeSign.imageUrl && <img src={targetPracticeSign.imageUrl} alt={t('practice.referenceAlt', { label: targetPracticeSign.modelLabel })} onError={(event) => event.currentTarget.remove()} />}</div><strong>{t('practice.reminderLabel', { label: targetPracticeSign.modelLabel })}</strong>{showAsConfusionHint && <div className="confusion-hint modal-hint"><span>👀</span><p>{t('practice.asConfusionHint')}</p></div>}<button className="primary-button" onClick={resumeAfterReminder}>{reminderCycles >= 3 ? t('practice.deferAndReview', { label: targetPracticeSign.modelLabel }) : t('practice.resume')}</button></section>
           </div>}
         </main>
       )}
