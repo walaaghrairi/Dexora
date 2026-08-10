@@ -7,19 +7,31 @@ import { translate, type Language, type TranslationKey } from './i18n'
 
 type Page = 'home' | 'catalogue' | 'dashboard' | 'rewards' | 'settings' | 'auth' | 'practice' | 'twoFactor'
 type PracticeStatus = 'idle' | 'analyzing' | 'ready'
+type PracticeMode = 'learn' | 'practice' | 'quiz'
 type RewardType = 'badge' | 'certificate'
 
 const demoCategories: Category[] = [
-  { id: 1, name: 'Salutations', description: 'Les expressions essentielles pour commencer une conversation.' },
-  { id: 2, name: 'Vie quotidienne', description: 'Les signes utiles à la maison, à l’école et dans la rue.' },
-  { id: 3, name: 'Vocabulaire médical', description: 'Communiquer clairement dans les situations de santé.' },
+  { id: 101, name: 'Alphabet ASL', description: 'Les 26 lettres reconnues par le modèle actuel.' },
+  { id: 102, name: 'Chiffres', description: 'Disponible avec le prochain modèle de reconnaissance.' },
 ]
 
 const demoCourses: Course[] = [
-  { id: 1, title: 'Premiers signes', description: 'Bonjour, merci, au revoir et comment ça va ?', categoryId: 1 },
-  { id: 2, title: 'Ma famille', description: 'Présenter les membres de la famille.', categoryId: 2 },
-  { id: 3, title: 'Urgences', description: 'Exprimer la douleur et demander de l’aide.', categoryId: 3 },
+  { id: 101, title: 'Alphabet A–Z', description: 'Observe, reproduis puis valide les 26 lettres avec un mini-test.', categoryId: 101 },
+  { id: 102, title: 'Chiffres ASL', description: 'Bientôt disponible avec un modèle entraîné sur les chiffres.', categoryId: 102 },
 ]
+
+const demoSigns: Sign[] = Array.from({ length: 26 }, (_, index) => {
+  const letter = String.fromCharCode(65 + index)
+  return {
+    id: 1001 + index,
+    word: `Lettre ${letter}`,
+    description: `Observe la forme de la main, puis reproduis la lettre ${letter}.`,
+    imageUrl: `https://commons.wikimedia.org/wiki/Special:Redirect/file/Sign_language_${letter}.svg`,
+    difficulty: 'DEBUTANT',
+    modelLabel: letter,
+    courseId: 101,
+  }
+})
 
 function App() {
   const [page, setPage] = useState<Page>('home')
@@ -38,6 +50,8 @@ function App() {
   const [pendingTwoFactorEmail, setPendingTwoFactorEmail] = useState('')
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('tunisign_theme') === 'dark')
   const [practiceStatus, setPracticeStatus] = useState<PracticeStatus>('idle')
+  const [practiceMode, setPracticeMode] = useState<PracticeMode>('learn')
+  const [quizSign, setQuizSign] = useState<Sign | null>(null)
   const [cameraActive, setCameraActive] = useState(false)
   const [prediction, setPrediction] = useState<SignPrediction | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -69,7 +83,7 @@ function App() {
         if (!hasLearningData) {
           setCategories(demoCategories)
           setCourses(demoCourses)
-          setSigns([])
+          setSigns(demoSigns)
           setUsesDemoData(true)
           return
         }
@@ -82,7 +96,7 @@ function App() {
       .catch(() => {
         setCategories(demoCategories)
         setCourses(demoCourses)
-        setSigns([])
+        setSigns(demoSigns)
         setUsesDemoData(true)
       })
       .finally(() => setLoading(false))
@@ -129,7 +143,7 @@ function App() {
     else video.addEventListener('loadedmetadata', playVideo, { once: true })
 
     return () => video.removeEventListener('loadedmetadata', playVideo)
-  }, [cameraActive, language])
+  }, [cameraActive, language, practiceMode])
 
   const displayedCourses = useMemo(
     () => selectedCategory === null ? courses : courses.filter((course) => course.categoryId === selectedCategory),
@@ -138,29 +152,37 @@ function App() {
 
   const earnedBadgeCount = Object.values(courseBadgeProgress).reduce((total, value) => total + value, 0)
   const earnedCertificateCount = courses.filter((course) => (courseBadgeProgress[course.id] ?? 0) >= badgeTotal(course)).length
-
-  const selectedCourseSigns = selectedCourse ? signs.filter((sign) => sign.courseId === selectedCourse.id) : []
+  const selectedCourseSigns = selectedCourse
+    ? signs.filter((sign) => sign.courseId === selectedCourse.id).sort((a, b) => a.modelLabel.localeCompare(b.modelLabel))
+    : []
   const selectedCourseEarned = selectedCourse ? courseBadgeProgress[selectedCourse.id] ?? 0 : 0
+  const selectedCourseComplete = selectedCourse ? selectedCourseEarned >= badgeTotal(selectedCourse) : false
   const activePracticeSign = selectedCourseSigns[Math.min(selectedCourseEarned, Math.max(selectedCourseSigns.length - 1, 0))]
+  const targetPracticeSign = practiceMode === 'quiz' ? quizSign : activePracticeSign
 
   function categoryLabel(category: Category) {
-    const keys: Record<number, TranslationKey> = { 1: 'category.greetings', 2: 'category.daily', 3: 'category.medical' }
-    return keys[category.id] ? t(keys[category.id]) : category.name
+    const keys: Record<string, TranslationKey> = { Salutations: 'category.greetings', 'Vie quotidienne': 'category.daily', 'Vocabulaire médical': 'category.medical' }
+    return keys[category.name] ? t(keys[category.name]) : category.name
   }
 
   function courseTitle(course: Course) {
-    const keys: Record<number, TranslationKey> = { 1: 'course.first', 2: 'course.family', 3: 'course.emergency' }
-    return keys[course.id] ? t(keys[course.id]) : course.title
+    const keys: Record<string, TranslationKey> = { 'Premiers signes': 'course.first', 'Ma famille': 'course.family', Urgences: 'course.emergency' }
+    return keys[course.title] ? t(keys[course.title]) : course.title
   }
 
   function courseCopy(course: Course) {
-    const keys: Record<number, TranslationKey> = { 1: 'course.firstCopy', 2: 'course.familyCopy', 3: 'course.emergencyCopy' }
-    return keys[course.id] ? t(keys[course.id]) : course.description || t('catalog.defaultCopy')
+    const keys: Record<string, TranslationKey> = { 'Premiers signes': 'course.firstCopy', 'Ma famille': 'course.familyCopy', Urgences: 'course.emergencyCopy' }
+    return keys[course.title] ? t(keys[course.title]) : course.description || t('catalog.defaultCopy')
   }
 
   function badgeTotal(course: Course) {
     const lessonCount = signs.filter((sign) => sign.courseId === course.id).length
     return lessonCount || 3
+  }
+
+  function isCourseAvailable(course: Course) {
+    const courseSigns = signs.filter((sign) => sign.courseId === course.id)
+    return courseSigns.length > 0 && courseSigns.every((sign) => /^[A-Z]$/.test(sign.modelLabel))
   }
 
   function navigate(nextPage: Page) {
@@ -171,9 +193,27 @@ function App() {
 
   function startLesson(course: Course) {
     setSelectedCourse(course)
+    setPracticeMode('learn')
+    setQuizSign(null)
     setPracticeStatus('idle')
     setPrediction(null)
     navigate('practice')
+  }
+
+  function beginPractice() {
+    setPracticeMode('practice')
+    setPrediction(null)
+    setPracticeStatus('idle')
+  }
+
+  function beginQuiz() {
+    const learnedPool = selectedCourseSigns.slice(0, Math.min(selectedCourseEarned + 1, selectedCourseSigns.length))
+    const target = learnedPool[Math.floor(Math.random() * learnedPool.length)] || activePracticeSign
+    setQuizSign(target || null)
+    setPracticeMode('quiz')
+    setPrediction(null)
+    setPracticeStatus('idle')
+    setNotice(t('notice.quizReady'))
   }
 
   function toggleTheme() {
@@ -253,6 +293,10 @@ function App() {
     }
 
     setRewardType(nextBadges >= totalBadges ? 'certificate' : 'badge')
+    setPracticeMode('learn')
+    setQuizSign(null)
+    setPrediction(null)
+    setPracticeStatus('idle')
     setCelebrationOpen(true)
   }
 
@@ -327,7 +371,7 @@ function App() {
   }
 
   const predictionScore = prediction ? Math.round(prediction.confidence * 100) : 0
-  const expectedLabel = activePracticeSign?.modelLabel?.trim() || ''
+  const expectedLabel = targetPracticeSign?.modelLabel?.trim() || ''
   const predictionMatches = Boolean(prediction) && (
     !expectedLabel || prediction!.label.toLocaleLowerCase() === expectedLabel.toLocaleLowerCase()
   )
@@ -408,16 +452,18 @@ function App() {
           </div>
           {loading ? <p>{t('catalog.loading')}</p> : (
             <section className="course-grid">
-              {displayedCourses.map((course) => (
-                <article className="course-card" key={course.id}>
+              {displayedCourses.map((course) => {
+                const available = isCourseAvailable(course)
+                const lessonCount = signs.filter((sign) => sign.courseId === course.id).length
+                return <article className={`course-card ${available ? '' : 'course-locked'}`} key={course.id}>
                   <div className="course-card-top"><div className="course-number">{String(course.id).padStart(2, '0')}</div><span className="course-xp">+20 XP</span></div>
-                  <div className="lesson-orb" aria-hidden="true">🤟</div>
+                  <div className="lesson-orb" aria-hidden="true">{available ? '🤟' : '🔒'}</div>
                   <h2>{courseTitle(course)}</h2>
                   <p>{courseCopy(course)}</p>
-                  <div className="lesson-meta"><span>{signs.filter((sign) => sign.courseId === course.id).length || '—'} {t('catalog.signs')}</span><span className="difficulty-dot">{t('catalog.beginner')}</span></div>
-                  <button className="lesson-start" onClick={() => startLesson(course)}>{t('catalog.start')} <span>→</span></button>
+                  <div className="lesson-meta"><span>{lessonCount || '—'} {t('catalog.signs')}</span><span className="difficulty-dot">{available ? t('catalog.beginner') : t('catalog.comingSoon')}</span></div>
+                  <button className="lesson-start" onClick={() => startLesson(course)} disabled={!available}>{available ? t('catalog.start') : t('catalog.modelRequired')} <span>{available ? '→' : '🔒'}</span></button>
                 </article>
-              ))}
+              })}
             </section>
           )}
         </main>
@@ -430,21 +476,34 @@ function App() {
             <div className="practice-stage">
               <div className="stage-header"><span>{t('practice.current')}</span><strong>{Math.min(selectedCourseEarned + 1, badgeTotal(selectedCourse))} / {badgeTotal(selectedCourse)}</strong></div>
               <div className="practice-progress"><span style={{ width: `${Math.max(8, (selectedCourseEarned / badgeTotal(selectedCourse)) * 100)}%` }} /></div>
-              <div className={`camera-stage ${practiceStatus}`}>
-                <div className="camera-grid" aria-hidden="true" /><span className="camera-corner corner-one" /><span className="camera-corner corner-two" /><span className="camera-corner corner-three" /><span className="camera-corner corner-four" />
-                {cameraActive ? <video ref={videoRef} className="camera-video" autoPlay muted playsInline /> : <div className="sign-visual"><span>👋</span><i>✦</i><i>✦</i></div>}
-                {practiceStatus === 'analyzing' && <div className="scanner-line" />}
-                <div className="camera-status"><i /> {practiceStatus === 'analyzing' ? t('practice.analyzing') : practiceStatus === 'ready' ? t('practice.detected') : cameraActive ? t('practice.cameraActive') : t('practice.cameraReady')}</div>
-              </div>
-              <p className="eyebrow">{t('practice.reproduce')}</p>
-              <h1>{activePracticeSign?.word || `${courseTitle(selectedCourse)} · ${selectedCourseEarned + 1}`}</h1>
-              <p>{t('practice.copy')}</p>
-              <button className="primary-button practice-button" onClick={startAnalysis} disabled={practiceStatus === 'analyzing'}>{practiceStatus === 'analyzing' ? t('practice.analyzingButton') : cameraActive ? t('practice.capture') : t('practice.activate')}</button>
-              <small className="model-notice">{t('practice.modelNotice')}</small>
+              {practiceMode === 'learn' ? <>
+                <div className="reference-stage">
+                  <span className="step-pill">{t('practice.stepObserve')}</span>
+                  <div className="reference-letter">{targetPracticeSign?.modelLabel}</div>
+                  {targetPracticeSign?.imageUrl && <img src={targetPracticeSign.imageUrl} alt={t('practice.referenceAlt', { label: targetPracticeSign.modelLabel })} onError={(event) => event.currentTarget.remove()} />}
+                  <strong>{targetPracticeSign?.modelLabel}</strong>
+                </div>
+                <p className="eyebrow">{t('practice.observe')}</p>
+                <h1>{targetPracticeSign?.word || `${courseTitle(selectedCourse)} · ${selectedCourseEarned + 1}`}</h1>
+                <p>{targetPracticeSign?.description || t('practice.observeCopy')}</p>
+                <button className="primary-button practice-button" onClick={beginPractice}>{t('practice.readyToRepeat')}</button>
+              </> : <>
+                <div className={`camera-stage ${practiceStatus}`}>
+                  <div className="camera-grid" aria-hidden="true" /><span className="camera-corner corner-one" /><span className="camera-corner corner-two" /><span className="camera-corner corner-three" /><span className="camera-corner corner-four" />
+                  {cameraActive ? <video ref={videoRef} className="camera-video" autoPlay muted playsInline /> : <div className="sign-visual"><span>👋</span><i>✦</i><i>✦</i></div>}
+                  {practiceStatus === 'analyzing' && <div className="scanner-line" />}
+                  <div className="camera-status"><i /> {practiceStatus === 'analyzing' ? t('practice.analyzing') : practiceStatus === 'ready' ? t('practice.detected') : cameraActive ? t('practice.cameraActive') : t('practice.cameraReady')}</div>
+                </div>
+                <p className="eyebrow">{practiceMode === 'quiz' ? t('practice.quizEyebrow') : t('practice.reproduce')}</p>
+                <h1>{practiceMode === 'quiz' ? t('practice.quizPrompt', { label: targetPracticeSign?.modelLabel || '?' }) : targetPracticeSign?.word || `${courseTitle(selectedCourse)} · ${selectedCourseEarned + 1}`}</h1>
+                <p>{practiceMode === 'quiz' ? t('practice.quizCopy') : t('practice.copy')}</p>
+                <button className="primary-button practice-button" onClick={startAnalysis} disabled={practiceStatus === 'analyzing'}>{practiceStatus === 'analyzing' ? t('practice.analyzingButton') : cameraActive ? t('practice.capture') : t('practice.activate')}</button>
+                <small className="model-notice">{t('practice.modelNotice')}</small>
+              </>}
             </div>
             <aside className="practice-side">
               <div className="xp-badge">⚡ +20 XP</div>
-              {practiceStatus === 'ready' && prediction ? <><div className="score-ring" style={{ '--score': predictionScore } as CSSProperties}><strong>{predictionScore}%</strong><small>{t('practice.confidence')}</small></div><div className="analysis-checks"><p>{t('practice.predicted')} : <b>{prediction.label}</b></p>{expectedLabel && <p>{t('practice.expected')} : <b>{expectedLabel}</b></p>}<p className={predictionAccepted ? 'prediction-ok' : 'prediction-retry'}>{predictionAccepted ? t('practice.correct') : t('practice.incorrect')}</p></div>{predictionAccepted ? <button className="primary-button compact" onClick={completeLesson}>{t('practice.finish')}</button> : <p className="retry-advice">{t('practice.retryAdvice')}</p>}</> : <><h2>{t('practice.goal')}</h2><p>{t('practice.goalCopy')}</p><div className="tip-card"><span>💡</span><p>{t('practice.tip')}</p></div></>}
+              {practiceMode === 'learn' ? <div className="lesson-steps"><h2>{t('practice.methodTitle')}</h2><p><b>1</b>{t('practice.methodObserve')}</p><p><b>2</b>{t('practice.methodRepeat')}</p><p><b>3</b>{t('practice.methodTest')}</p></div> : practiceStatus === 'ready' && prediction ? <><div className="score-ring" style={{ '--score': predictionScore } as CSSProperties}><strong>{predictionScore}%</strong><small>{t('practice.confidence')}</small></div><div className="analysis-checks"><p>{t('practice.predicted')} : <b>{prediction.label}</b></p>{expectedLabel && <p>{t('practice.expected')} : <b>{expectedLabel}</b></p>}<p className={predictionAccepted ? 'prediction-ok' : 'prediction-retry'}>{predictionAccepted ? t('practice.correct') : t('practice.incorrect')}</p></div>{predictionAccepted ? <button className="primary-button compact" onClick={practiceMode === 'quiz' ? completeLesson : beginQuiz}>{practiceMode === 'quiz' ? t('practice.validateLesson') : t('practice.startQuiz')}</button> : <p className="retry-advice">{t('practice.retryAdvice')}</p>}</> : <><h2>{practiceMode === 'quiz' ? t('practice.quizTitle') : t('practice.goal')}</h2><p>{practiceMode === 'quiz' ? t('practice.quizGoal') : t('practice.goalCopy')}</p><div className="tip-card"><span>💡</span><p>{t('practice.tip')}</p></div></>}
             </aside>
           </section>
         </main>
@@ -559,7 +618,7 @@ function App() {
 
       {celebrationOpen && <div className="celebration-overlay" role="dialog" aria-modal="true" aria-label="Leçon terminée">
         <div className="confetti" aria-hidden="true"><i /><i /><i /><i /><i /><i /></div>
-        <section className="celebration-card"><span className="celebration-medal">{rewardType === 'certificate' ? '📜' : '🏅'}</span><p className="eyebrow">{t('celebration.eyebrow')}</p><h1>{rewardType === 'certificate' ? t('celebration.certificateTitle') : t('celebration.badgeTitle')}</h1><p>{rewardType === 'certificate' ? t('celebration.certificateCopy') : t('celebration.badgeCopy')}</p><strong>+20 XP</strong><div className="celebration-stars" aria-label="Trois étoiles">★ ★ ★</div><button className="primary-button" onClick={() => { setCelebrationOpen(false); navigate('rewards') }}>{t('celebration.viewRewards')}</button></section>
+        <section className="celebration-card"><span className="celebration-medal">{rewardType === 'certificate' ? '📜' : '🏅'}</span><p className="eyebrow">{t('celebration.eyebrow')}</p><h1>{rewardType === 'certificate' ? t('celebration.certificateTitle') : t('celebration.badgeTitle')}</h1><p>{rewardType === 'certificate' ? t('celebration.certificateCopy') : t('celebration.badgeCopy')}</p><strong>+20 XP</strong><div className="celebration-stars" aria-label="Trois étoiles">★ ★ ★</div><button className="primary-button" onClick={() => { setCelebrationOpen(false); if (selectedCourseComplete) navigate('rewards') }}>{selectedCourseComplete ? t('celebration.viewRewards') : t('celebration.nextLetter')}</button></section>
       </div>}
 
       {selectedCertificate && <div className="certificate-overlay" role="dialog" aria-modal="true">
