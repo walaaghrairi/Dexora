@@ -57,6 +57,10 @@ function App() {
   const [practiceStatus, setPracticeStatus] = useState<PracticeStatus>('idle')
   const [practiceMode, setPracticeMode] = useState<PracticeMode>('learn')
   const [quizSign, setQuizSign] = useState<Sign | null>(null)
+  const [finalTestSigns, setFinalTestSigns] = useState<Sign[]>([])
+  const [finalTestIndex, setFinalTestIndex] = useState(0)
+  const [failedAttempts, setFailedAttempts] = useState(0)
+  const [gestureReminderOpen, setGestureReminderOpen] = useState(false)
   const [cameraActive, setCameraActive] = useState(false)
   const [prediction, setPrediction] = useState<SignPrediction | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -173,6 +177,8 @@ function App() {
     expectedLabelRef.current = targetPracticeSign?.modelLabel?.trim().toLocaleLowerCase() || ''
     recentPredictionsRef.current = []
     autoRecognitionPausedRef.current = false
+    setFailedAttempts(0)
+    setGestureReminderOpen(false)
     setPrediction(null)
     if (cameraActive && practiceMode !== 'learn') setPracticeStatus('analyzing')
   }, [cameraActive, practiceMode, targetPracticeSign?.id, targetPracticeSign?.modelLabel])
@@ -227,10 +233,21 @@ function App() {
         || result.label.toLocaleLowerCase() === expectedLabelRef.current
       if (matchesExpected && averageConfidence >= ACCEPTANCE_CONFIDENCE) {
         autoRecognitionPausedRef.current = true
+        setFailedAttempts(0)
         setNotice(translate(language, 'notice.autoDetected', {
           label: result.label,
           score: Math.round(averageConfidence * 100),
         }))
+      } else {
+        setFailedAttempts((current) => {
+          const next = current + 1
+          if (next >= 6) {
+            autoRecognitionPausedRef.current = true
+            setGestureReminderOpen(true)
+            setNotice(translate(language, 'notice.gestureReminder'))
+          }
+          return next
+        })
       }
     } catch (error) {
       setPracticeStatus('idle')
@@ -282,6 +299,10 @@ function App() {
     setSelectedCourse(course)
     setPracticeMode('learn')
     setQuizSign(null)
+    setFinalTestSigns([])
+    setFinalTestIndex(0)
+    setFailedAttempts(0)
+    setGestureReminderOpen(false)
     setPracticeStatus('idle')
     setPrediction(null)
     navigate('practice')
@@ -295,16 +316,57 @@ function App() {
     setPracticeStatus('idle')
   }
 
-  function beginQuiz() {
-    const learnedPool = selectedCourseSigns.slice(0, Math.min(selectedCourseEarned + 1, selectedCourseSigns.length))
-    const target = learnedPool[Math.floor(Math.random() * learnedPool.length)] || activePracticeSign
-    setQuizSign(target || null)
+  function beginFinalTest() {
+    const shuffled = [...selectedCourseSigns]
+    for (let index = shuffled.length - 1; index > 0; index--) {
+      const randomIndex = Math.floor(Math.random() * (index + 1))
+      ;[shuffled[index], shuffled[randomIndex]] = [shuffled[randomIndex], shuffled[index]]
+    }
+    const testSigns = shuffled.slice(0, Math.min(5, shuffled.length))
+    setFinalTestSigns(testSigns)
+    setFinalTestIndex(0)
+    setQuizSign(testSigns[0] || activePracticeSign || null)
     recentPredictionsRef.current = []
     autoRecognitionPausedRef.current = false
     setPracticeMode('quiz')
     setPrediction(null)
     setPracticeStatus('idle')
-    setNotice(t('notice.quizReady'))
+    setFailedAttempts(0)
+    setGestureReminderOpen(false)
+    setNotice(t('notice.finalTestReady'))
+  }
+
+  function finishPracticeStep() {
+    if (!selectedCourse) return
+    const isLastLetter = selectedCourseEarned + 1 >= badgeTotal(selectedCourse)
+    if (isLastLetter) beginFinalTest()
+    else completeLesson()
+  }
+
+  function advanceFinalTest() {
+    const nextIndex = finalTestIndex + 1
+    if (nextIndex >= finalTestSigns.length) {
+      completeLesson()
+      return
+    }
+    setFinalTestIndex(nextIndex)
+    setQuizSign(finalTestSigns[nextIndex])
+    recentPredictionsRef.current = []
+    autoRecognitionPausedRef.current = false
+    setPrediction(null)
+    setPracticeStatus('analyzing')
+    setFailedAttempts(0)
+    setGestureReminderOpen(false)
+  }
+
+  function resumeAfterReminder() {
+    recentPredictionsRef.current = []
+    autoRecognitionPausedRef.current = false
+    setPrediction(null)
+    setPracticeStatus('analyzing')
+    setFailedAttempts(0)
+    setGestureReminderOpen(false)
+    setNotice(t('notice.analysisResumed'))
   }
 
   function toggleTheme() {
@@ -356,6 +418,10 @@ function App() {
     setRewardType(nextBadges >= totalBadges ? 'certificate' : 'badge')
     setPracticeMode('learn')
     setQuizSign(null)
+    setFinalTestSigns([])
+    setFinalTestIndex(0)
+    setFailedAttempts(0)
+    setGestureReminderOpen(false)
     setPrediction(null)
     setPracticeStatus('idle')
     setCelebrationOpen(true)
@@ -437,6 +503,8 @@ function App() {
     !expectedLabel || prediction!.label.toLocaleLowerCase() === expectedLabel.toLocaleLowerCase()
   )
   const predictionAccepted = predictionMatches && predictionScore >= ACCEPTANCE_CONFIDENCE * 100
+  const isLastPracticeLetter = selectedCourse ? selectedCourseEarned + 1 >= badgeTotal(selectedCourse) : false
+  const isLastFinalTestSign = finalTestIndex + 1 >= finalTestSigns.length
 
   return (
     <div className={`app-shell ${darkMode ? 'dark-mode' : ''}`} lang={language} dir={language === 'ar' ? 'rtl' : 'ltr'}>
@@ -557,17 +625,21 @@ function App() {
                   <div className="camera-status"><i /> {practiceStatus === 'analyzing' ? t('practice.analyzing') : practiceStatus === 'ready' ? t('practice.detected') : cameraActive ? t('practice.cameraActive') : t('practice.cameraReady')}</div>
                 </div>
                 <p className="eyebrow">{practiceMode === 'quiz' ? t('practice.quizEyebrow') : t('practice.reproduce')}</p>
-                <h1>{practiceMode === 'quiz' ? t('practice.quizPrompt', { label: targetPracticeSign?.modelLabel || '?' }) : targetPracticeSign?.word || `${courseTitle(selectedCourse)} · ${selectedCourseEarned + 1}`}</h1>
+                <h1>{practiceMode === 'quiz' ? t('practice.finalTestPrompt', { label: targetPracticeSign?.modelLabel || '?', current: finalTestIndex + 1, total: finalTestSigns.length }) : targetPracticeSign?.word || `${courseTitle(selectedCourse)} · ${selectedCourseEarned + 1}`}</h1>
                 <p>{practiceMode === 'quiz' ? t('practice.quizCopy') : t('practice.copy')}</p>
                 <button className="primary-button practice-button" onClick={startAnalysis} disabled={cameraActive}>{cameraActive ? t('practice.autoActive') : t('practice.activate')}</button>
+                {failedAttempts > 0 && <small className="attempt-counter">{t('practice.attemptCounter', { count: failedAttempts })}</small>}
                 <small className="model-notice">{t('practice.modelNotice')}</small>
               </>}
             </div>
             <aside className="practice-side">
               <div className="xp-badge">⚡ +20 XP</div>
-              {practiceMode === 'learn' ? <div className="lesson-steps"><h2>{t('practice.methodTitle')}</h2><p><b>1</b>{t('practice.methodObserve')}</p><p><b>2</b>{t('practice.methodRepeat')}</p><p><b>3</b>{t('practice.methodTest')}</p></div> : practiceStatus === 'ready' && prediction ? <><div className="score-ring" style={{ '--score': predictionScore } as CSSProperties}><strong>{predictionScore}%</strong><small>{t('practice.confidence')}</small></div><div className="analysis-checks"><p>{t('practice.predicted')} : <b>{prediction.label}</b></p>{expectedLabel && <p>{t('practice.expected')} : <b>{expectedLabel}</b></p>}<p className={predictionAccepted ? 'prediction-ok' : 'prediction-retry'}>{predictionAccepted ? t('practice.correct') : t('practice.incorrect')}</p></div>{predictionAccepted ? <button className="primary-button compact" onClick={practiceMode === 'quiz' ? completeLesson : beginQuiz}>{practiceMode === 'quiz' ? t('practice.validateLesson') : t('practice.startQuiz')}</button> : <p className="retry-advice">{t('practice.retryAdvice')}</p>}</> : <><h2>{practiceMode === 'quiz' ? t('practice.quizTitle') : t('practice.goal')}</h2><p>{practiceMode === 'quiz' ? t('practice.quizGoal') : t('practice.goalCopy')}</p><div className="tip-card"><span>💡</span><p>{t('practice.tip')}</p></div></>}
+              {practiceMode === 'learn' ? <div className="lesson-steps"><h2>{t('practice.methodTitle')}</h2><p><b>1</b>{t('practice.methodObserve')}</p><p><b>2</b>{t('practice.methodRepeat')}</p><p><b>3</b>{t('practice.methodTest')}</p></div> : practiceStatus === 'ready' && prediction ? <><div className="score-ring" style={{ '--score': predictionScore } as CSSProperties}><strong>{predictionScore}%</strong><small>{t('practice.confidence')}</small></div><div className="analysis-checks"><p>{t('practice.predicted')} : <b>{prediction.label}</b></p>{expectedLabel && <p>{t('practice.expected')} : <b>{expectedLabel}</b></p>}<p className={predictionAccepted ? 'prediction-ok' : 'prediction-retry'}>{predictionAccepted ? t('practice.correct') : t('practice.incorrect')}</p></div>{predictionAccepted ? <button className="primary-button compact" onClick={practiceMode === 'quiz' ? advanceFinalTest : finishPracticeStep}>{practiceMode === 'quiz' ? isLastFinalTestSign ? t('practice.validateCourse') : t('practice.nextTestLetter') : isLastPracticeLetter ? t('practice.startFinalTest') : t('practice.finish')}</button> : <p className="retry-advice">{t('practice.retryAdvice')}</p>}</> : <><h2>{practiceMode === 'quiz' ? t('practice.finalTestTitle') : t('practice.goal')}</h2><p>{practiceMode === 'quiz' ? t('practice.finalTestGoal') : t('practice.goalCopy')}</p><div className="tip-card"><span>💡</span><p>{t('practice.tip')}</p></div></>}
             </aside>
           </section>
+          {gestureReminderOpen && targetPracticeSign && <div className="gesture-reminder-overlay" role="dialog" aria-modal="true" aria-label={t('practice.reminderTitle')}>
+            <section className="gesture-reminder-card"><p className="eyebrow">{t('practice.reminderEyebrow')}</p><h2>{t('practice.reminderTitle')}</h2><p>{t('practice.reminderCopy', { count: 6 })}</p><div className="reminder-gesture"><div className="reference-letter">{targetPracticeSign.modelLabel}</div>{targetPracticeSign.imageUrl && <img src={targetPracticeSign.imageUrl} alt={t('practice.referenceAlt', { label: targetPracticeSign.modelLabel })} onError={(event) => event.currentTarget.remove()} />}</div><strong>{t('practice.reminderLabel', { label: targetPracticeSign.modelLabel })}</strong><button className="primary-button" onClick={resumeAfterReminder}>{t('practice.resume')}</button></section>
+          </div>}
         </main>
       )}
 
