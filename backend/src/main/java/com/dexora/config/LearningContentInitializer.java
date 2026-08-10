@@ -13,6 +13,8 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+
 @Component
 @RequiredArgsConstructor
 public class LearningContentInitializer implements ApplicationRunner {
@@ -48,6 +50,7 @@ public class LearningContentInitializer implements ApplicationRunner {
                 sign.setImageUrl(COMMONS_REFERENCE.formatted(label));
                 sign.setDifficulty(Difficulty.BEGINNER);
                 sign.setModelLabel(label);
+                sign.setCreatedAt(LocalDateTime.now());
             }
             sign.setCourse(alphabetCourse);
             signRepository.save(sign);
@@ -70,6 +73,7 @@ public class LearningContentInitializer implements ApplicationRunner {
         Category category = new Category();
         category.setName(name);
         category.setDescription(description);
+        category.setCreatedAt(LocalDateTime.now());
         return categoryRepository.save(category);
     }
 
@@ -78,6 +82,7 @@ public class LearningContentInitializer implements ApplicationRunner {
         course.setTitle(title);
         course.setDescription(description);
         course.setCategory(category);
+        course.setCreatedAt(LocalDateTime.now());
         return courseRepository.save(course);
     }
 }
