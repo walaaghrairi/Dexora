@@ -5,6 +5,8 @@
 .model-notice { display: block; max-width: 430px; margin: 13px auto 0; color: var(--muted); line-height: 1.45; }
 .analysis-checks .prediction-retry { color: #cf5c4e; }
 .retry-advice { color: var(--muted); font-size: 14px; line-height: 1.5; }
+.practice-button:disabled { cursor: default; opacity: 1; }
+.hand-guide { position: absolute; z-index: 2; display: grid; place-items: end center; height: 78%; aspect-ratio: 1; border: 2px dashed #83f1d0aa; border-radius: 24px; box-shadow: 0 0 0 999px #05213118; pointer-events: none; }.hand-guide span { margin-bottom: 8px; padding: 4px 8px; color: #fff; font-size: 9px; font-weight: 900; letter-spacing: .08em; border-radius: 99px; background: #08253dbb; }
 .reference-stage img, .reference-stage .reference-letter { grid-area: 1 / 1; }
 .reference-stage img { z-index: 1; }
 .course-card.course-locked { opacity: .72; filter: saturate(.65); }.course-card.course-locked:hover { transform: none; }.lesson-start:disabled { cursor: not-allowed; opacity: .75; }

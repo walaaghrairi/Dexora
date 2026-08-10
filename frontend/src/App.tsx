@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, FormEvent } from 'react'
 import { api } from './services/api'
 import type { Account, Category, Course, Sign, SignPrediction, TwoFactorSetup } from './types/api'
@@ -9,6 +9,11 @@ type Page = 'home' | 'catalogue' | 'dashboard' | 'rewards' | 'settings' | 'auth'
 type PracticeStatus = 'idle' | 'analyzing' | 'ready'
 type PracticeMode = 'learn' | 'practice' | 'quiz'
 type RewardType = 'badge' | 'certificate'
+
+const AUTO_ANALYSIS_INTERVAL_MS = 900
+const STABLE_FRAME_COUNT = 2
+const ACCEPTANCE_CONFIDENCE = 0.4
+const HAND_REGION_RATIO = 0.78
 
 const demoCategories: Category[] = [
   { id: 101, name: 'Alphabet ASL', description: 'Les 26 lettres reconnues par le modèle actuel.' },
@@ -56,6 +61,10 @@ function App() {
   const [prediction, setPrediction] = useState<SignPrediction | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const analysisInFlightRef = useRef(false)
+  const recentPredictionsRef = useRef<Array<{ label: string; confidence: number }>>([])
+  const expectedLabelRef = useRef('')
+  const autoRecognitionPausedRef = useRef(false)
   const [celebrationOpen, setCelebrationOpen] = useState(false)
   const [sessionXp, setSessionXp] = useState(0)
   const [completedLessons, setCompletedLessons] = useState(0)
@@ -160,6 +169,84 @@ function App() {
   const activePracticeSign = selectedCourseSigns[Math.min(selectedCourseEarned, Math.max(selectedCourseSigns.length - 1, 0))]
   const targetPracticeSign = practiceMode === 'quiz' ? quizSign : activePracticeSign
 
+  useEffect(() => {
+    expectedLabelRef.current = targetPracticeSign?.modelLabel?.trim().toLocaleLowerCase() || ''
+    recentPredictionsRef.current = []
+    autoRecognitionPausedRef.current = false
+    setPrediction(null)
+    if (cameraActive && practiceMode !== 'learn') setPracticeStatus('analyzing')
+  }, [cameraActive, practiceMode, targetPracticeSign?.id, targetPracticeSign?.modelLabel])
+
+  const analyzeCurrentFrame = useCallback(async () => {
+    if (analysisInFlightRef.current || autoRecognitionPausedRef.current) return
+    const video = videoRef.current
+    if (!video || !video.videoWidth || !video.videoHeight) return
+
+    analysisInFlightRef.current = true
+    try {
+      const canvas = document.createElement('canvas')
+      canvas.width = 448
+      canvas.height = 448
+      const context = canvas.getContext('2d')
+      if (!context) throw new Error('Canvas indisponible')
+      const sourceSize = Math.min(video.videoWidth, video.videoHeight) * HAND_REGION_RATIO
+      const sourceX = (video.videoWidth - sourceSize) / 2
+      const sourceY = (video.videoHeight - sourceSize) / 2
+      context.translate(canvas.width, 0)
+      context.scale(-1, 1)
+      context.drawImage(
+        video,
+        sourceX,
+        sourceY,
+        sourceSize,
+        sourceSize,
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+      )
+      const image = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Capture impossible')), 'image/jpeg', 0.9)
+      })
+      const result = await api.predictSign(image)
+      const history = [...recentPredictionsRef.current, { label: result.label, confidence: result.confidence }]
+        .slice(-STABLE_FRAME_COUNT)
+      recentPredictionsRef.current = history
+      const stable = history.length === STABLE_FRAME_COUNT && history.every((item) => item.label === history[0].label)
+
+      if (!stable) {
+        setPracticeStatus('analyzing')
+        return
+      }
+
+      const averageConfidence = history.reduce((total, item) => total + item.confidence, 0) / history.length
+      const stablePrediction = { ...result, confidence: averageConfidence }
+      setPrediction(stablePrediction)
+      setPracticeStatus('ready')
+      const matchesExpected = !expectedLabelRef.current
+        || result.label.toLocaleLowerCase() === expectedLabelRef.current
+      if (matchesExpected && averageConfidence >= ACCEPTANCE_CONFIDENCE) {
+        autoRecognitionPausedRef.current = true
+        setNotice(translate(language, 'notice.autoDetected', {
+          label: result.label,
+          score: Math.round(averageConfidence * 100),
+        }))
+      }
+    } catch (error) {
+      setPracticeStatus('idle')
+      setNotice(error instanceof Error ? error.message : translate(language, 'notice.analysisError'))
+    } finally {
+      analysisInFlightRef.current = false
+    }
+  }, [language])
+
+  useEffect(() => {
+    if (!cameraActive || practiceMode === 'learn') return
+    void analyzeCurrentFrame()
+    const interval = window.setInterval(() => void analyzeCurrentFrame(), AUTO_ANALYSIS_INTERVAL_MS)
+    return () => window.clearInterval(interval)
+  }, [analyzeCurrentFrame, cameraActive, practiceMode, targetPracticeSign?.id])
+
   function categoryLabel(category: Category) {
     const keys: Record<string, TranslationKey> = { Salutations: 'category.greetings', 'Vie quotidienne': 'category.daily', 'Vocabulaire médical': 'category.medical' }
     return keys[category.name] ? t(keys[category.name]) : category.name
@@ -201,6 +288,8 @@ function App() {
   }
 
   function beginPractice() {
+    recentPredictionsRef.current = []
+    autoRecognitionPausedRef.current = false
     setPracticeMode('practice')
     setPrediction(null)
     setPracticeStatus('idle')
@@ -210,6 +299,8 @@ function App() {
     const learnedPool = selectedCourseSigns.slice(0, Math.min(selectedCourseEarned + 1, selectedCourseSigns.length))
     const target = learnedPool[Math.floor(Math.random() * learnedPool.length)] || activePracticeSign
     setQuizSign(target || null)
+    recentPredictionsRef.current = []
+    autoRecognitionPausedRef.current = false
     setPracticeMode('quiz')
     setPrediction(null)
     setPracticeStatus('idle')
@@ -225,50 +316,20 @@ function App() {
   }
 
   async function startAnalysis() {
-    if (!cameraActive) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
-          audio: false,
-        })
-        streamRef.current = stream
-        setCameraActive(true)
-        setPrediction(null)
-        setNotice(t('notice.cameraReady'))
-      } catch {
-        setNotice(t('notice.cameraError'))
-      }
-      return
-    }
-
-    const video = videoRef.current
-    if (!video || !video.videoWidth || !video.videoHeight) {
-      setNotice(t('notice.cameraWait'))
-      return
-    }
-
-    setPracticeStatus('analyzing')
-    setPrediction(null)
-    setNotice(t('notice.analysis'))
     try {
-      const canvas = document.createElement('canvas')
-      canvas.width = video.videoWidth
-      canvas.height = video.videoHeight
-      const context = canvas.getContext('2d')
-      if (!context) throw new Error('Canvas indisponible')
-      context.translate(canvas.width, 0)
-      context.scale(-1, 1)
-      context.drawImage(video, 0, 0, canvas.width, canvas.height)
-      const image = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Capture impossible')), 'image/jpeg', 0.92)
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+        audio: false,
       })
-      const result = await api.predictSign(image)
-      setPrediction(result)
-      setPracticeStatus('ready')
-      setNotice(t('notice.analysisReady', { label: result.label }))
-    } catch (error) {
-      setPracticeStatus('idle')
-      setNotice(error instanceof Error ? error.message : t('notice.analysisError'))
+      streamRef.current = stream
+      recentPredictionsRef.current = []
+      autoRecognitionPausedRef.current = false
+      setCameraActive(true)
+      setPrediction(null)
+      setPracticeStatus('analyzing')
+      setNotice(t('notice.autoAnalysisStarted'))
+    } catch {
+      setNotice(t('notice.cameraError'))
     }
   }
 
@@ -375,7 +436,7 @@ function App() {
   const predictionMatches = Boolean(prediction) && (
     !expectedLabel || prediction!.label.toLocaleLowerCase() === expectedLabel.toLocaleLowerCase()
   )
-  const predictionAccepted = predictionMatches && predictionScore >= 60
+  const predictionAccepted = predictionMatches && predictionScore >= ACCEPTANCE_CONFIDENCE * 100
 
   return (
     <div className={`app-shell ${darkMode ? 'dark-mode' : ''}`} lang={language} dir={language === 'ar' ? 'rtl' : 'ltr'}>
@@ -491,13 +552,14 @@ function App() {
                 <div className={`camera-stage ${practiceStatus}`}>
                   <div className="camera-grid" aria-hidden="true" /><span className="camera-corner corner-one" /><span className="camera-corner corner-two" /><span className="camera-corner corner-three" /><span className="camera-corner corner-four" />
                   {cameraActive ? <video ref={videoRef} className="camera-video" autoPlay muted playsInline /> : <div className="sign-visual"><span>👋</span><i>✦</i><i>✦</i></div>}
+                  {cameraActive && <div className="hand-guide" aria-hidden="true"><span>{t('practice.handZone')}</span></div>}
                   {practiceStatus === 'analyzing' && <div className="scanner-line" />}
                   <div className="camera-status"><i /> {practiceStatus === 'analyzing' ? t('practice.analyzing') : practiceStatus === 'ready' ? t('practice.detected') : cameraActive ? t('practice.cameraActive') : t('practice.cameraReady')}</div>
                 </div>
                 <p className="eyebrow">{practiceMode === 'quiz' ? t('practice.quizEyebrow') : t('practice.reproduce')}</p>
                 <h1>{practiceMode === 'quiz' ? t('practice.quizPrompt', { label: targetPracticeSign?.modelLabel || '?' }) : targetPracticeSign?.word || `${courseTitle(selectedCourse)} · ${selectedCourseEarned + 1}`}</h1>
                 <p>{practiceMode === 'quiz' ? t('practice.quizCopy') : t('practice.copy')}</p>
-                <button className="primary-button practice-button" onClick={startAnalysis} disabled={practiceStatus === 'analyzing'}>{practiceStatus === 'analyzing' ? t('practice.analyzingButton') : cameraActive ? t('practice.capture') : t('practice.activate')}</button>
+                <button className="primary-button practice-button" onClick={startAnalysis} disabled={cameraActive}>{cameraActive ? t('practice.autoActive') : t('practice.activate')}</button>
                 <small className="model-notice">{t('practice.modelNotice')}</small>
               </>}
             </div>
