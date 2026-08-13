@@ -206,8 +206,6 @@ function App() {
       const sourceSize = Math.min(video.videoWidth, video.videoHeight) * HAND_REGION_RATIO
       const sourceX = (video.videoWidth - sourceSize) / 2
       const sourceY = (video.videoHeight - sourceSize) / 2
-      context.translate(canvas.width, 0)
-      context.scale(-1, 1)
       context.drawImage(
         video,
         sourceX,
@@ -699,12 +697,12 @@ function App() {
                 <button className="primary-button practice-button" onClick={startAnalysis} disabled={cameraActive}>{cameraActive ? t('practice.autoActive') : t('practice.activate')}</button>
                 {failedAttempts > 0 && <small className="attempt-counter">{t('practice.attemptCounter', { count: failedAttempts })}</small>}
                 {showAsConfusionHint && <div className="confusion-hint"><span>👀</span><p>{t('practice.asConfusionHint')}</p></div>}
-                <small className="model-notice">{t('practice.modelNotice')}</small>
+                <small className="model-notice">{['J', 'Z'].includes(targetPracticeSign?.modelLabel || '') ? t('practice.motionNotice') : t('practice.modelNotice')}</small>
               </>}
             </div>
             <aside className="practice-side">
               <div className="xp-badge">⚡ +20 XP</div>
-              {practiceMode === 'learn' ? <div className="lesson-steps"><h2>{t('practice.methodTitle')}</h2><p><b>1</b>{t('practice.methodObserve')}</p><p><b>2</b>{t('practice.methodRepeat')}</p><p><b>3</b>{t('practice.methodTest')}</p></div> : practiceStatus === 'ready' && prediction ? <><div className="score-ring" style={{ '--score': predictionScore } as CSSProperties}><strong>{predictionScore}%</strong><small>{t('practice.confidence')}</small></div><div className="analysis-checks"><p>{t('practice.predicted')} : <b>{prediction.label}</b></p>{expectedLabel && <p>{t('practice.expected')} : <b>{expectedLabel}</b></p>}<p className={predictionAccepted ? 'prediction-ok' : 'prediction-retry'}>{predictionAccepted ? t('practice.correct') : t('practice.incorrect')}</p></div>{predictionAccepted ? <button className="primary-button compact" onClick={practiceMode === 'quiz' ? advanceFinalTest : finishPracticeStep}>{practiceMode === 'quiz' ? isLastFinalTestSign ? t('practice.validateCourse') : t('practice.nextTestLetter') : recoveryReviewSign ? t('practice.recoveryReady') : isLastPracticeLetter ? t('practice.startFinalTest') : t('practice.finish')}</button> : <p className="retry-advice">{t('practice.retryAdvice')}</p>}</> : <><h2>{practiceMode === 'quiz' ? t('practice.finalTestTitle') : t('practice.goal')}</h2><p>{practiceMode === 'quiz' ? t('practice.finalTestGoal') : t('practice.goalCopy')}</p><div className="tip-card"><span>💡</span><p>{t('practice.tip')}</p></div></>}
+              {practiceMode === 'learn' ? <div className="lesson-steps"><h2>{t('practice.methodTitle')}</h2><p><b>1</b>{t('practice.methodObserve')}</p><p><b>2</b>{t('practice.methodRepeat')}</p><p><b>3</b>{t('practice.methodTest')}</p></div> : practiceStatus === 'ready' && prediction ? <><div className="score-ring" style={{ '--score': predictionScore } as CSSProperties}><strong>{predictionScore}%</strong><small>{t('practice.confidence')}</small></div><div className="analysis-checks"><p>{t('practice.predicted')} : <b>{prediction.label}</b></p>{expectedLabel && <p>{t('practice.expected')} : <b>{expectedLabel}</b></p>}{prediction.orientation && <p>{t('practice.orientationUsed')} : <b>{prediction.orientation === 'mirrored' ? t('practice.orientationMirrored') : t('practice.orientationOriginal')}</b></p>}{prediction.landmarkRefinement?.applied && <p>{t('practice.landmarkCorrection')} : <b>A/S</b></p>}<p className={predictionAccepted ? 'prediction-ok' : 'prediction-retry'}>{predictionAccepted ? t('practice.correct') : t('practice.incorrect')}</p></div>{predictionAccepted ? <button className="primary-button compact" onClick={practiceMode === 'quiz' ? advanceFinalTest : finishPracticeStep}>{practiceMode === 'quiz' ? isLastFinalTestSign ? t('practice.validateCourse') : t('practice.nextTestLetter') : recoveryReviewSign ? t('practice.recoveryReady') : isLastPracticeLetter ? t('practice.startFinalTest') : t('practice.finish')}</button> : <p className="retry-advice">{t('practice.retryAdvice')}</p>}</> : <><h2>{practiceMode === 'quiz' ? t('practice.finalTestTitle') : t('practice.goal')}</h2><p>{practiceMode === 'quiz' ? t('practice.finalTestGoal') : t('practice.goalCopy')}</p><div className="tip-card"><span>💡</span><p>{t('practice.tip')}</p></div></>}
             </aside>
           </section>
           {gestureReminderOpen && targetPracticeSign && <div className="gesture-reminder-overlay" role="dialog" aria-modal="true" aria-label={t('practice.reminderTitle')}>

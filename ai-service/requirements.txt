@@ -5,3 +5,5 @@ tensorflow==2.18.0
 pillow>=10.0
 numpy>=1.26,<2.1
 python-multipart>=0.0.9
+mediapipe==0.10.21
+opencv-contrib-python==4.11.0.86

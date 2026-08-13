@@ -41,4 +41,20 @@ export type SignPrediction = {
   topPredictions: Array<{ label: string; confidence: number }>
   model: string
   inputShape: number[]
+  orientation?: 'original' | 'mirrored'
+  variants?: Array<{
+    orientation: 'original' | 'mirrored'
+    label: string
+    confidence: number
+    handDetected: boolean
+  }>
+  handDetected?: boolean
+  handedness?: string | null
+  motionRequired?: boolean
+  landmarkRefinement?: {
+    available: boolean
+    applied: boolean
+    label?: string
+    confidence?: number
+  }
 }

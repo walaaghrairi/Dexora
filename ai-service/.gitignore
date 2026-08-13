@@ -2,3 +2,8 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+dataset/images/**
+dataset/landmarks/*.jsonl
+dataset/video/**
+reports/**
+!dataset/.gitkeep

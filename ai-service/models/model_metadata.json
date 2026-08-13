@@ -1,0 +1,8 @@
+{
+  "modelVersion": "legacy-1",
+  "classOrderVerified": false,
+  "classOrderSource": "Convention ASL Alphabet; original class_indices unavailable",
+  "normalization": "0_1",
+  "inputSize": [224, 224, 3],
+  "dynamicClasses": ["J", "Z"]
+}
