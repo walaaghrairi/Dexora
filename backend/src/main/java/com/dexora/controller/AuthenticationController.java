@@ -3,6 +3,7 @@ package com.dexora.controller;
 import com.dexora.dto.AuthenticationResponse;
 import com.dexora.dto.LoginRequest;
 import com.dexora.dto.RegisterRequest;
+import com.dexora.dto.TwoFactorLoginRequest;
 import com.dexora.service.AuthenticationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -26,5 +27,10 @@ public class AuthenticationController {
     @PostMapping("/login")
     public ResponseEntity<AuthenticationResponse> login(@RequestBody LoginRequest request) {
         return ResponseEntity.ok(authenticationService.login(request));
+    }
+
+    @PostMapping("/2fa/verify")
+    public ResponseEntity<AuthenticationResponse> verifyTwoFactor(@RequestBody TwoFactorLoginRequest request) {
+        return ResponseEntity.ok(authenticationService.verifyTwoFactor(request));
     }
 }

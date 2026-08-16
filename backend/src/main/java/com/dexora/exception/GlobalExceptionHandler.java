@@ -18,6 +18,11 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(ex.getMessage(), HttpStatus.NOT_FOUND);
     }
 
+    @ExceptionHandler(CertificateEligibilityException.class)
+    public ResponseEntity<String> handleCertificateEligibilityException(CertificateEligibilityException ex) {
+        return new ResponseEntity<>(ex.getMessage(), HttpStatus.CONFLICT);
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, String>> handleValidationExceptions(MethodArgumentNotValidException ex) {
         Map<String, String> errors = new HashMap<>();

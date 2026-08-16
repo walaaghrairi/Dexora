@@ -5,13 +5,18 @@ import com.dexora.dto.LoginRequest;
 import com.dexora.dto.RegisterRequest;
 import com.dexora.dto.UserDTO;
 import com.dexora.dto.UserResponseDTO;
+import com.dexora.dto.TwoFactorLoginRequest;
 import com.dexora.enums.Role;
+import com.dexora.entity.User;
+import com.dexora.repository.UserRepository;
 import com.dexora.security.JwtService;
+import com.dexora.security.TotpService;
 import com.dexora.service.AuthenticationService;
 import com.dexora.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -26,6 +31,8 @@ public class AuthenticationServiceImpl implements AuthenticationService {
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
     private final UserDetailsService userDetailsService;
+    private final UserRepository userRepository;
+    private final TotpService totpService;
 
     @Override
     public AuthenticationResponse register(RegisterRequest request) {
@@ -57,8 +64,24 @@ public class AuthenticationServiceImpl implements AuthenticationService {
                         request.getPassword()
                 )
         );
+        User user = userRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> new BadCredentialsException("Bad credentials"));
+        if (user.isTwoFactorEnabled()) {
+            return AuthenticationResponse.builder().twoFactorRequired(true).email(user.getEmail()).build();
+        }
         UserDetails userDetails = userDetailsService.loadUserByUsername(request.getEmail());
         String jwt = jwtService.generateToken(userDetails);
         return AuthenticationResponse.builder().token(jwt).build();
+    }
+
+    @Override
+    public AuthenticationResponse verifyTwoFactor(TwoFactorLoginRequest request) {
+        User user = userRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> new BadCredentialsException("Bad credentials"));
+        if (!user.isTwoFactorEnabled() || !totpService.isValid(user.getTwoFactorSecret(), request.getCode())) {
+            throw new BadCredentialsException("Invalid two-factor authentication code");
+        }
+        UserDetails userDetails = userDetailsService.loadUserByUsername(user.getEmail());
+        return AuthenticationResponse.builder().token(jwtService.generateToken(userDetails)).build();
     }
 }

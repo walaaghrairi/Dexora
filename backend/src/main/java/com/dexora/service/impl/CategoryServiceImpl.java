@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.time.LocalDateTime;
 import java.util.stream.Collectors;
 
 @Service
@@ -23,6 +24,9 @@ public class CategoryServiceImpl implements CategoryService {
     @Override
     public CategoryDTO create(CategoryDTO categoryDTO) {
         Category category = CategoryMapper.toEntity(categoryDTO);
+        if (category.getCreatedAt() == null) {
+            category.setCreatedAt(LocalDateTime.now());
+        }
         return CategoryMapper.toDTO(categoryRepository.save(category));
     }
 
