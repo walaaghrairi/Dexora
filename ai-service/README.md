@@ -76,11 +76,19 @@ Redémarrer ensuite le service. `/health` doit afficher `asLandmarkRefiner: true
 
 ## 5. Réentraîner le modèle d'images
 
-Le mode normal exige les 29 dossiers. Pour un essai incomplet, ajouter `--allow-partial`.
+Le profil par défaut `alphabet` entraîne uniquement les 26 lettres A–Z utilisées par les leçons. Les anciennes classes de contrôle `del`, `nothing` et `space` ne sont donc pas obligatoires.
+
+Vérifier d'abord les images sans lancer TensorFlow :
+
+```powershell
+.\.venv\Scripts\python.exe scripts\train_model.py --check-only
+```
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\train_model.py --epochs 15 --fine-tune-epochs 5
 ```
+
+Pour reproduire explicitement l'ancien modèle à 29 classes, il faut collecter les trois classes de contrôle puis utiliser `--profile legacy29`. `--profile available` reste disponible pour un prototype incomplet.
 
 Le script :
 
@@ -91,7 +99,7 @@ Le script :
 - enregistre un modèle MobileNetV2 dans `models/asl_recognition_model_v2.keras` ;
 - marque l'ordre des classes comme vérifié.
 
-Pour utiliser le nouveau modèle :
+Au redémarrage, le service choisit automatiquement `asl_recognition_model_v2.keras` s'il existe. Pour forcer explicitement un autre modèle :
 
 ```powershell
 $env:MODEL_PATH="models/asl_recognition_model_v2.keras"
@@ -100,7 +108,13 @@ $env:MODEL_PATH="models/asl_recognition_model_v2.keras"
 
 ## 6. Évaluer les confusions
 
-Placer un dataset indépendant dans `dataset/test/<classe>/`, puis exécuter :
+Collecter des images indépendantes (nouvelle session, autres fonds et éclairages) dans `dataset/test/images/<classe>/`. Le script de collecte crée automatiquement cette structure :
+
+```powershell
+.\.venv\Scripts\python.exe scripts\collect_webcam.py --data dataset/test --label A --target 30
+```
+
+Puis exécuter :
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\evaluate_model.py

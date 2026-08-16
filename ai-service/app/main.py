@@ -16,7 +16,10 @@ from .hand_preprocessing import HandFrame, HandPreprocessor
 from .landmark_refiner import AsLandmarkRefiner
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-MODEL_PATH = Path(os.getenv("MODEL_PATH", BASE_DIR / "models" / "asl_recognition_model.h5"))
+TRAINED_MODEL_PATH = BASE_DIR / "models" / "asl_recognition_model_v2.keras"
+LEGACY_MODEL_PATH = BASE_DIR / "models" / "asl_recognition_model.h5"
+DEFAULT_MODEL_PATH = TRAINED_MODEL_PATH if TRAINED_MODEL_PATH.exists() else LEGACY_MODEL_PATH
+MODEL_PATH = Path(os.getenv("MODEL_PATH", DEFAULT_MODEL_PATH))
 LABELS_PATH = Path(os.getenv("LABELS_PATH", BASE_DIR / "models" / "labels.json"))
 MODEL_CLASS_INDICES_PATH = MODEL_PATH.with_suffix(".classes.json")
 MODEL_METADATA_PATH = MODEL_PATH.with_suffix(".metadata.json")
@@ -103,11 +106,12 @@ def prepare_image(image: Image.Image) -> np.ndarray:
     return np.expand_dims(pixels, axis=0)
 
 
-def run_prediction(image: Image.Image) -> np.ndarray:
+def run_predictions(images: list[Image.Image]) -> np.ndarray:
     if model is None:
         raise RuntimeError(model_error or "Le modèle IA n'est pas chargé")
+    batch = np.concatenate([prepare_image(image) for image in images], axis=0)
     with model_lock:
-        result = model.predict(prepare_image(image), verbose=0)[0]
+        result = model(batch, training=False)
     return np.asarray(result, dtype=np.float32)
 
 
@@ -117,25 +121,42 @@ def predict_variants(source: Image.Image) -> dict:
         hand: HandFrame = hand_preprocessor.extract(image)
         if hand_preprocessor.available and not hand.detected:
             continue
-        probabilities = run_prediction(hand.image)
+        candidates.append(
+            {
+                "orientation": orientation,
+                "hand": hand,
+            }
+        )
+
+    if not candidates:
+        return {
+            "status": "no_hand",
+            "label": "",
+            "confidence": 0.0,
+            "topPredictions": [],
+            "orientation": None,
+            "variants": [],
+            "handDetected": False,
+            "handedness": None,
+            "boundingBox": None,
+            "landmarkRefinement": {
+                "available": as_refiner.available,
+                "applied": False,
+            },
+        }
+
+    probability_batches = run_predictions([candidate["hand"].image for candidate in candidates])
+    for candidate, probabilities in zip(candidates, probability_batches, strict=True):
+        hand = candidate["hand"]
         refined, refinement = as_refiner.refine(
             probabilities,
             labels,
             hand.landmarks,
             hand.handedness,
         )
-        candidates.append(
-            {
-                "orientation": orientation,
-                "probabilities": refined,
-                "rawProbabilities": probabilities,
-                "hand": hand,
-                "refinement": refinement,
-            }
-        )
-
-    if not candidates:
-        raise ValueError("Aucune main détectée. Place une seule main entière dans le cadre et améliore l'éclairage.")
+        candidate["probabilities"] = refined
+        candidate["rawProbabilities"] = probabilities
+        candidate["refinement"] = refinement
 
     best = max(candidates, key=lambda candidate: float(np.max(candidate["probabilities"])))
     probabilities = best["probabilities"]
@@ -158,6 +179,7 @@ def predict_variants(source: Image.Image) -> dict:
 
     hand: HandFrame = best["hand"]
     return {
+        "status": "recognized",
         "label": top_predictions[0]["label"],
         "confidence": top_predictions[0]["confidence"],
         "topPredictions": top_predictions,

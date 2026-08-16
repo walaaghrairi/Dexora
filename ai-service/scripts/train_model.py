@@ -19,7 +19,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--validation-split", type=float, default=0.2)
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--weights", choices=("imagenet", "none"), default="imagenet")
-    parser.add_argument("--allow-partial", action="store_true", help="Autoriser un modèle avec moins de 29 classes")
+    parser.add_argument(
+        "--profile",
+        choices=("alphabet", "legacy29", "available"),
+        default="alphabet",
+        help="alphabet=A-Z (cours), legacy29=A-Z+del/nothing/space, available=classes non vides",
+    )
+    parser.add_argument(
+        "--allow-partial",
+        action="store_true",
+        help="Alias historique de --profile available",
+    )
+    parser.add_argument(
+        "--check-only",
+        action="store_true",
+        help="Vérifier les classes et les images sans lancer TensorFlow",
+    )
     return parser.parse_args()
 
 
@@ -37,22 +52,57 @@ def count_images(data_dir: Path, labels: list[str]) -> Counter:
     )
 
 
+def select_class_names(
+    labels: list[str], counts: Counter, profile: str, allow_partial: bool
+) -> tuple[list[str], list[str]]:
+    if allow_partial:
+        profile = "available"
+
+    if profile == "alphabet":
+        requested = [label for label in labels if len(label) == 1 and "A" <= label <= "Z"]
+    elif profile == "legacy29":
+        requested = labels
+    else:
+        requested = [label for label in labels if counts[label] > 0]
+
+    missing = [label for label in requested if counts[label] == 0]
+    return requested, missing
+
+
 def main() -> None:
     args = parse_args()
+    if not args.data.is_dir():
+        raise SystemExit(f"Dataset introuvable : {args.data}")
+    if not 0 < args.validation_split < 1:
+        raise SystemExit("--validation-split doit être compris entre 0 et 1.")
+
+    labels = configured_labels()
+    counts = count_images(args.data, labels)
+    selected_profile = "available" if args.allow_partial else args.profile
+    class_names, missing = select_class_names(labels, counts, args.profile, args.allow_partial)
+    if missing:
+        raise SystemExit(
+            f"Classes requises sans images pour le profil {selected_profile} : "
+            + ", ".join(missing)
+            + "."
+        )
+    if len(class_names) < 2:
+        raise SystemExit("Au moins deux classes contenant des images sont nécessaires.")
+
+    ignored = [label for label in labels if label not in class_names and counts[label] > 0]
+    print(f"Profil : {selected_profile}")
+    print("Classes : " + ", ".join(class_names))
+    print("Images : " + ", ".join(f"{label}={counts[label]}" for label in class_names))
+    if ignored:
+        print("Classes ignorées par ce profil : " + ", ".join(ignored))
+    if args.check_only:
+        print("Vérification terminée : le dataset est prêt pour l'entraînement.")
+        return
+
     import tensorflow as tf
     from tensorflow import keras
 
     tf.keras.utils.set_random_seed(args.seed)
-    labels = configured_labels()
-    counts = count_images(args.data, labels)
-    missing = [label for label in labels if counts[label] == 0]
-    if missing and not args.allow_partial:
-        raise SystemExit(
-            "Classes sans images : " + ", ".join(missing) + ". Collectez-les ou utilisez --allow-partial."
-        )
-    class_names = [label for label in labels if counts[label] > 0]
-    if len(class_names) < 2:
-        raise SystemExit("Au moins deux classes contenant des images sont nécessaires.")
 
     train_ds, validation_ds = keras.utils.image_dataset_from_directory(
         args.data,
@@ -146,12 +196,14 @@ def main() -> None:
     )
     metadata = {
         "modelVersion": "2.0",
+        "trainingProfile": selected_profile,
         "classOrderVerified": True,
         "classOrderSource": "Explicit class_names passed to image_dataset_from_directory",
         "normalization": "embedded",
         "inputSize": [224, 224, 3],
         "dynamicClasses": [label for label in ("J", "Z") if label in class_names],
         "trainingImageCounts": {label: counts[label] for label in class_names},
+        "ignoredClasses": ignored,
         "hardClasses": sorted(difficult.intersection(class_names)),
         "seed": args.seed,
     }

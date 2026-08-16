@@ -7,4 +7,6 @@ import java.util.Optional;
 
 public interface SignRepository extends JpaRepository<Sign, Long> {
     Optional<Sign> findByModelLabel(String modelLabel);
+
+    long countByCourseId(Long courseId);
 }

@@ -24,12 +24,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--camera", type=int, default=0, help="Index de la webcam OpenCV")
     parser.add_argument("--interval", type=float, default=0.30, help="Intervalle de capture automatique")
     parser.add_argument("--data", type=Path, default=ROOT / "dataset", help="Racine du dataset")
+    parser.add_argument(
+        "--profile",
+        choices=("alphabet", "legacy29"),
+        default="alphabet",
+        help="alphabet=A-Z (cours), legacy29=A-Z+del/nothing/space",
+    )
     return parser.parse_args()
 
 
-def load_labels() -> list[str]:
+def load_labels(profile: str) -> list[str]:
     with (ROOT / "models" / "labels.json").open(encoding="utf-8") as labels_file:
-        return json.load(labels_file)
+        labels = json.load(labels_file)
+    if profile == "alphabet":
+        return [label for label in labels if len(label) == 1 and "A" <= label <= "Z"]
+    return labels
 
 
 def image_count(folder: Path) -> int:
@@ -38,7 +47,7 @@ def image_count(folder: Path) -> int:
 
 def main() -> None:
     args = parse_args()
-    labels = load_labels()
+    labels = load_labels(args.profile)
     if args.label not in labels:
         raise SystemExit(f"Classe inconnue : {args.label}. Valeurs : {', '.join(labels)}")
 

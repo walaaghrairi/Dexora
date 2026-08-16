@@ -1,0 +1,56 @@
+{
+  "modelVersion": "2.0",
+  "trainingProfile": "alphabet",
+  "classOrderVerified": true,
+  "classOrderSource": "Explicit class_names passed to image_dataset_from_directory",
+  "normalization": "embedded",
+  "inputSize": [
+    224,
+    224,
+    3
+  ],
+  "dynamicClasses": [
+    "J",
+    "Z"
+  ],
+  "trainingImageCounts": {
+    "A": 200,
+    "B": 80,
+    "C": 95,
+    "D": 112,
+    "E": 110,
+    "F": 106,
+    "G": 91,
+    "H": 93,
+    "I": 114,
+    "J": 94,
+    "K": 79,
+    "L": 81,
+    "M": 89,
+    "N": 93,
+    "O": 75,
+    "P": 109,
+    "Q": 90,
+    "R": 127,
+    "S": 101,
+    "T": 100,
+    "U": 108,
+    "V": 110,
+    "W": 104,
+    "X": 166,
+    "Y": 110,
+    "Z": 60
+  },
+  "ignoredClasses": [
+    "nothing",
+    "space"
+  ],
+  "hardClasses": [
+    "A",
+    "M",
+    "N",
+    "S",
+    "T"
+  ],
+  "seed": 2026
+}

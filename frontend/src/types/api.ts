@@ -35,7 +35,25 @@ export type Account = {
 
 export type TwoFactorSetup = { secret: string; otpAuthUri: string }
 
+export type CertificateCredential = {
+  valid: boolean
+  status: 'AUTHENTIC' | 'REVOKED' | 'INVALID_SIGNATURE' | 'CERTIFICATE_NOT_FOUND'
+  verificationCode: string
+  studentName?: string
+  courseId?: number
+  courseTitle?: string
+  issuedAt?: string
+  earnedBadges?: number
+  requiredBadges?: number
+  digitalSignature?: string
+  signatureAlgorithm?: string
+  publicKeyFingerprint?: string
+  verificationUrl: string
+  qrCodeDataUrl?: string
+}
+
 export type SignPrediction = {
+  status: 'recognized' | 'no_hand'
   label: string
   confidence: number
   topPredictions: Array<{ label: string; confidence: number }>

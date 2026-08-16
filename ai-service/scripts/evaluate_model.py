@@ -14,7 +14,7 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Évalue TuniSign et produit une matrice de confusion")
-    parser.add_argument("--data", type=Path, default=ROOT / "dataset" / "test")
+    parser.add_argument("--data", type=Path, default=ROOT / "dataset" / "test" / "images")
     parser.add_argument("--model", type=Path, default=ROOT / "models" / "asl_recognition_model_v2.keras")
     parser.add_argument("--report", type=Path, default=ROOT / "reports" / "evaluation.json")
     return parser.parse_args()
@@ -22,17 +22,44 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    from tensorflow import keras
+    if not args.model.is_file():
+        raise SystemExit(
+            f"Modèle introuvable : {args.model}\n"
+            "L'entraînement doit réussir avant l'évaluation. Lancez d'abord scripts/train_model.py."
+        )
+    if not args.data.is_dir():
+        raise SystemExit(
+            f"Dataset de test introuvable : {args.data}\n"
+            "Collectez des images indépendantes avec --data dataset/test, puis relancez l'évaluation."
+        )
 
     indices_path = args.model.with_suffix(".classes.json")
     if not indices_path.exists():
         indices_path = args.model.parent / "class_indices.json"
+    if not indices_path.is_file():
+        raise SystemExit(f"Ordre des classes introuvable : {indices_path}")
     indices = json.loads(indices_path.read_text(encoding="utf-8"))
     labels = [name for name, _ in sorted(indices.items(), key=lambda item: item[1])]
     metadata_path = args.model.with_suffix(".metadata.json")
     if not metadata_path.exists():
         metadata_path = args.model.parent / "model_metadata.json"
     metadata = json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.exists() else {}
+    test_counts = {
+        label: sum(
+            1
+            for path in (args.data / label).glob("*")
+            if path.suffix.lower() in IMAGE_EXTENSIONS
+        )
+        for label in labels
+    }
+    if not any(test_counts.values()):
+        raise SystemExit(
+            f"Aucune image de test trouvée dans {args.data}. "
+            "Le format attendu est dataset/test/images/<classe>/*.jpg."
+        )
+
+    from tensorflow import keras
+
     model = keras.models.load_model(args.model, compile=False)
     confusion = np.zeros((len(labels), len(labels)), dtype=np.int64)
 
@@ -78,6 +105,7 @@ def main() -> None:
         "samples": total,
         "accuracy": correct / total if total else None,
         "classIndices": indices,
+        "testImageCounts": test_counts,
         "perClass": per_class,
         "topConfusions": confusions[:20],
     }

@@ -1,19 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, FormEvent } from 'react'
 import { api } from './services/api'
-import type { Account, Category, Course, Sign, SignPrediction, TwoFactorSetup } from './types/api'
+import type { Account, Category, CertificateCredential, Course, Sign, SignPrediction, TwoFactorSetup } from './types/api'
 import tunisignLogo from './assets/tunisign-sina-logo.png'
 import { translate, type Language, type TranslationKey } from './i18n'
 
-type Page = 'home' | 'catalogue' | 'dashboard' | 'rewards' | 'settings' | 'auth' | 'practice' | 'twoFactor'
-type PracticeStatus = 'idle' | 'analyzing' | 'ready'
+type Page = 'home' | 'catalogue' | 'dashboard' | 'rewards' | 'settings' | 'auth' | 'practice' | 'twoFactor' | 'verifyCertificate'
+type PracticeStatus = 'idle' | 'analyzing' | 'ready' | 'no-hand'
 type PracticeMode = 'learn' | 'practice' | 'quiz'
 type RewardType = 'badge' | 'certificate'
 
 const AUTO_ANALYSIS_INTERVAL_MS = 900
 const STABLE_FRAME_COUNT = 2
 const ACCEPTANCE_CONFIDENCE = 0.4
-const HAND_REGION_RATIO = 0.78
+const MAX_CAPTURE_EDGE = 640
+const COURSE_HELP_LIMIT = 4
+
+function initialPage(): Page {
+  return window.location.pathname.startsWith('/verify-certificate/') ? 'verifyCertificate' : 'home'
+}
 
 const demoCategories: Category[] = [
   { id: 101, name: 'Alphabet ASL', description: 'Les 26 lettres reconnues par le modèle actuel.' },
@@ -39,7 +44,7 @@ const demoSigns: Sign[] = Array.from({ length: 26 }, (_, index) => {
 })
 
 function App() {
-  const [page, setPage] = useState<Page>('home')
+  const [page, setPage] = useState<Page>(initialPage)
   const [categories, setCategories] = useState<Category[]>([])
   const [courses, setCourses] = useState<Course[]>([])
   const [signs, setSigns] = useState<Sign[]>([])
@@ -63,8 +68,7 @@ function App() {
   const [reminderCycles, setReminderCycles] = useState(0)
   const [gestureReminderOpen, setGestureReminderOpen] = useState(false)
   const [learningQueue, setLearningQueue] = useState<Sign[]>([])
-  const [previousMasteredSign, setPreviousMasteredSign] = useState<Sign | null>(null)
-  const [recoveryReviewSign, setRecoveryReviewSign] = useState<Sign | null>(null)
+  const [courseHelpCredits, setCourseHelpCredits] = useState<Record<number, number>>({})
   const [showAsConfusionHint, setShowAsConfusionHint] = useState(false)
   const [cameraActive, setCameraActive] = useState(false)
   const [prediction, setPrediction] = useState<SignPrediction | null>(null)
@@ -80,7 +84,10 @@ function App() {
   const [sessionStreak, setSessionStreak] = useState(0)
   const [courseBadgeProgress, setCourseBadgeProgress] = useState<Record<number, number>>({})
   const [rewardType, setRewardType] = useState<RewardType>('badge')
-  const [selectedCertificate, setSelectedCertificate] = useState<Course | null>(null)
+  const [selectedCertificate, setSelectedCertificate] = useState<{ course: Course; credential: CertificateCredential } | null>(null)
+  const [certificateLoadingId, setCertificateLoadingId] = useState<number | null>(null)
+  const [certificateVerification, setCertificateVerification] = useState<CertificateCredential | null>(null)
+  const [verificationLoading, setVerificationLoading] = useState(page === 'verifyCertificate')
   const [language, setLanguage] = useState<Language>(() => {
     const saved = localStorage.getItem('tunisign_language')
     return saved === 'en' || saved === 'ar' ? saved : 'fr'
@@ -93,6 +100,33 @@ function App() {
     document.documentElement.lang = language
     document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr'
   }, [language])
+
+  useEffect(() => {
+    if (page !== 'verifyCertificate') return
+    const match = window.location.pathname.match(/^\/verify-certificate\/([^/]+)$/)
+    if (!match) {
+      setCertificateVerification({
+        valid: false,
+        status: 'CERTIFICATE_NOT_FOUND',
+        verificationCode: '',
+        verificationUrl: window.location.href,
+      })
+      setVerificationLoading(false)
+      return
+    }
+
+    const verificationCode = decodeURIComponent(match[1])
+    setVerificationLoading(true)
+    api.verifyCertificate(verificationCode)
+      .then(setCertificateVerification)
+      .catch(() => setCertificateVerification({
+        valid: false,
+        status: 'CERTIFICATE_NOT_FOUND',
+        verificationCode,
+        verificationUrl: window.location.href,
+      }))
+      .finally(() => setVerificationLoading(false))
+  }, [page])
 
   useEffect(() => {
     Promise.allSettled([api.categories(), api.courses(), api.signs()])
@@ -138,6 +172,15 @@ function App() {
   }, [account?.id])
 
   useEffect(() => {
+    const storageKey = `tunisign_course_helps_${account?.id ?? 'guest'}`
+    try {
+      setCourseHelpCredits(JSON.parse(localStorage.getItem(storageKey) || '{}') as Record<number, number>)
+    } catch {
+      setCourseHelpCredits({})
+    }
+  }, [account?.id])
+
+  useEffect(() => {
     if (page === 'practice') return
     streamRef.current?.getTracks().forEach((track) => track.stop())
     streamRef.current = null
@@ -176,8 +219,11 @@ function App() {
   const selectedCourseEarned = selectedCourse ? courseBadgeProgress[selectedCourse.id] ?? 0 : 0
   const selectedCourseComplete = selectedCourse ? selectedCourseEarned >= badgeTotal(selectedCourse) : false
   const fallbackPracticeSign = selectedCourseSigns[Math.min(selectedCourseEarned, Math.max(selectedCourseSigns.length - 1, 0))]
-  const activePracticeSign = recoveryReviewSign || learningQueue[0] || fallbackPracticeSign
+  const activePracticeSign = learningQueue[0] || fallbackPracticeSign
   const targetPracticeSign = practiceMode === 'quiz' ? quizSign : activePracticeSign
+  const remainingHelpCredits = selectedCourse
+    ? courseHelpCredits[selectedCourse.id] ?? COURSE_HELP_LIMIT
+    : COURSE_HELP_LIMIT
 
   useEffect(() => {
     expectedLabelRef.current = targetPracticeSign?.modelLabel?.trim().toLocaleLowerCase() || ''
@@ -199,19 +245,13 @@ function App() {
     analysisInFlightRef.current = true
     try {
       const canvas = document.createElement('canvas')
-      canvas.width = 448
-      canvas.height = 448
+      const scale = Math.min(1, MAX_CAPTURE_EDGE / Math.max(video.videoWidth, video.videoHeight))
+      canvas.width = Math.max(1, Math.round(video.videoWidth * scale))
+      canvas.height = Math.max(1, Math.round(video.videoHeight * scale))
       const context = canvas.getContext('2d')
       if (!context) throw new Error('Canvas indisponible')
-      const sourceSize = Math.min(video.videoWidth, video.videoHeight) * HAND_REGION_RATIO
-      const sourceX = (video.videoWidth - sourceSize) / 2
-      const sourceY = (video.videoHeight - sourceSize) / 2
       context.drawImage(
         video,
-        sourceX,
-        sourceY,
-        sourceSize,
-        sourceSize,
         0,
         0,
         canvas.width,
@@ -221,6 +261,12 @@ function App() {
         canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Capture impossible')), 'image/jpeg', 0.9)
       })
       const result = await api.predictSign(image)
+      if (result.status === 'no_hand' || !result.handDetected) {
+        recentPredictionsRef.current = []
+        setPrediction(null)
+        setPracticeStatus('no-hand')
+        return
+      }
       const history = [...recentPredictionsRef.current, { label: result.label, confidence: result.confidence }]
         .slice(-STABLE_FRAME_COUNT)
       recentPredictionsRef.current = history
@@ -304,8 +350,34 @@ function App() {
 
   function navigate(nextPage: Page) {
     setNotice('')
+    if (window.location.pathname.startsWith('/verify-certificate/')) {
+      window.history.pushState({}, '', '/')
+    }
     setPage(nextPage)
     window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  async function openCertificate(course: Course) {
+    if (!isAuthenticated || !account) {
+      setIsRegistering(false)
+      navigate('auth')
+      setNotice(t('notice.certificateLogin'))
+      return
+    }
+
+    const earnedBadges = courseBadgeProgress[course.id] ?? 0
+    if (earnedBadges < badgeTotal(course)) return
+
+    setCertificateLoadingId(course.id)
+    try {
+      const credential = await api.issueCertificate(course.id, earnedBadges)
+      if (!credential.valid) throw new Error(t('notice.certificateIssueError'))
+      setSelectedCertificate({ course, credential })
+    } catch (error) {
+      setNotice(error instanceof Error && error.message ? error.message : t('notice.certificateIssueError'))
+    } finally {
+      setCertificateLoadingId(null)
+    }
   }
 
   function startLesson(course: Course) {
@@ -315,8 +387,6 @@ function App() {
     const earned = courseBadgeProgress[course.id] ?? 0
     setSelectedCourse(course)
     setLearningQueue(orderedSigns.slice(earned))
-    setPreviousMasteredSign(earned > 0 ? orderedSigns[earned - 1] : null)
-    setRecoveryReviewSign(null)
     setPracticeMode('learn')
     setQuizSign(null)
     setFinalTestSigns([])
@@ -360,20 +430,42 @@ function App() {
 
   function finishPracticeStep() {
     if (!selectedCourse) return
-    if (recoveryReviewSign) {
-      setRecoveryReviewSign(null)
-      setPracticeMode('learn')
-      setPrediction(null)
-      setPracticeStatus('idle')
-      setFailedAttempts(0)
-      setReminderCycles(0)
-      setShowAsConfusionHint(false)
-      setNotice(t('notice.reviewCompleted'))
-      return
-    }
     const isLastLetter = selectedCourseEarned + 1 >= badgeTotal(selectedCourse)
     if (isLastLetter) beginFinalTest()
     else completeLesson()
+  }
+
+  function resetForNextLetter() {
+    recentPredictionsRef.current = []
+    autoRecognitionPausedRef.current = false
+    setPracticeMode('learn')
+    setPrediction(null)
+    setPracticeStatus('idle')
+    setFailedAttempts(0)
+    setReminderCycles(0)
+    setGestureReminderOpen(false)
+    setShowAsConfusionHint(false)
+  }
+
+  function deferCurrentLetter() {
+    if (!activePracticeSign || learningQueue.length < 2) return
+    const difficultSign = activePracticeSign
+    setLearningQueue((current) => {
+      const remaining = current.filter((sign) => sign.id !== difficultSign.id)
+      return [...remaining, difficultSign]
+    })
+    resetForNextLetter()
+    setNotice(t('notice.letterDeferred', { difficult: difficultSign.modelLabel }))
+  }
+
+  function useHelpForCurrentLetter() {
+    if (!selectedCourse || !activePracticeSign || remainingHelpCredits <= 0 || practiceMode === 'quiz') return
+    const nextCredits = remainingHelpCredits - 1
+    const updatedCredits = { ...courseHelpCredits, [selectedCourse.id]: nextCredits }
+    setCourseHelpCredits(updatedCredits)
+    localStorage.setItem(`tunisign_course_helps_${account?.id ?? 'guest'}`, JSON.stringify(updatedCredits))
+    setNotice(t('notice.helpUsed', { label: activePracticeSign.modelLabel, count: nextCredits }))
+    completeLesson()
   }
 
   function advanceFinalTest() {
@@ -410,11 +502,8 @@ function App() {
           const remaining = current.filter((sign) => sign.id !== difficultSign.id)
           return [...remaining, difficultSign]
         })
-        setRecoveryReviewSign(previousMasteredSign)
         setPracticeMode('learn')
-        setNotice(previousMasteredSign
-          ? t('notice.letterDeferredWithReview', { difficult: difficultSign.modelLabel, previous: previousMasteredSign.modelLabel })
-          : t('notice.letterDeferred', { difficult: difficultSign.modelLabel }))
+        setNotice(t('notice.letterDeferred', { difficult: difficultSign.modelLabel }))
       }
       setReminderCycles(0)
     } else {
@@ -462,7 +551,7 @@ function App() {
     const nextBadges = Math.min(currentBadges + 1, totalBadges)
 
     if (currentBadges >= totalBadges) {
-      setSelectedCertificate(selectedCourse)
+      void openCertificate(selectedCourse)
       return
     }
 
@@ -475,8 +564,7 @@ function App() {
       setSessionStreak((current) => current + 1)
     }
 
-    if (activePracticeSign && !recoveryReviewSign) {
-      setPreviousMasteredSign(activePracticeSign)
+    if (activePracticeSign) {
       setLearningQueue((current) => current.filter((sign) => sign.id !== activePracticeSign.id))
     }
 
@@ -597,8 +685,43 @@ function App() {
         </div>
       </header>
 
-      {usesDemoData && <div className="status-banner">{t('demo.banner')}</div>}
+      {usesDemoData && page !== 'verifyCertificate' && <div className="status-banner">{t('demo.banner')}</div>}
       {notice && <div className="notice">{notice}</div>}
+
+      {page === 'verifyCertificate' && (
+        <main className="verification-page">
+          <section className={`verification-card ${certificateVerification?.valid ? 'valid' : 'invalid'}`}>
+            <img className="verification-logo" src={tunisignLogo} alt="TuniSign SINA" />
+            {verificationLoading ? (
+              <><div className="verification-spinner" /><h1>{t('verification.loading')}</h1></>
+            ) : certificateVerification?.valid ? (
+              <>
+                <div className="verification-status-icon">✓</div>
+                <p className="eyebrow">{t('verification.eyebrow')}</p>
+                <h1>{t('verification.validTitle')}</h1>
+                <p className="verification-lead">{t('verification.validCopy')}</p>
+                <dl className="verification-details">
+                  <div><dt>{t('verification.holder')}</dt><dd>{certificateVerification.studentName}</dd></div>
+                  <div><dt>{t('verification.course')}</dt><dd>{certificateVerification.courseTitle}</dd></div>
+                  <div><dt>{t('verification.issued')}</dt><dd>{certificateVerification.issuedAt ? new Intl.DateTimeFormat(language === 'ar' ? 'ar-TN' : language === 'en' ? 'en-GB' : 'fr-FR').format(new Date(certificateVerification.issuedAt)) : '—'}</dd></div>
+                  <div><dt>{t('verification.badges')}</dt><dd>{certificateVerification.earnedBadges} / {certificateVerification.requiredBadges}</dd></div>
+                </dl>
+                <div className="verification-proof"><span>🛡️</span><div><b>{certificateVerification.signatureAlgorithm}</b><small>{t('verification.fingerprint')} : {certificateVerification.publicKeyFingerprint}</small></div></div>
+                <code className="verification-code">{certificateVerification.verificationCode}</code>
+              </>
+            ) : (
+              <>
+                <div className="verification-status-icon">!</div>
+                <p className="eyebrow">{t('verification.eyebrow')}</p>
+                <h1>{t('verification.invalidTitle')}</h1>
+                <p className="verification-lead">{t('verification.invalidCopy')}</p>
+                <code className="verification-code">{certificateVerification?.verificationCode || '—'}</code>
+              </>
+            )}
+            {!verificationLoading && <button className="ghost-button" onClick={() => navigate('home')}>{t('verification.back')}</button>}
+          </section>
+        </main>
+      )}
 
       {page === 'home' && (
         <main>
@@ -674,7 +797,7 @@ function App() {
               <div className="practice-progress"><span style={{ width: `${Math.max(8, (selectedCourseEarned / badgeTotal(selectedCourse)) * 100)}%` }} /></div>
               {practiceMode === 'learn' ? <>
                 <div className="reference-stage">
-                  <span className="step-pill">{recoveryReviewSign ? t('practice.recoveryStep') : t('practice.stepObserve')}</span>
+                  <span className="step-pill">{t('practice.stepObserve')}</span>
                   <div className="reference-letter">{targetPracticeSign?.modelLabel}</div>
                   {targetPracticeSign?.imageUrl && <img src={targetPracticeSign.imageUrl} alt={t('practice.referenceAlt', { label: targetPracticeSign.modelLabel })} onError={(event) => event.currentTarget.remove()} />}
                   <strong>{targetPracticeSign?.modelLabel}</strong>
@@ -682,31 +805,39 @@ function App() {
                 <p className="eyebrow">{t('practice.observe')}</p>
                 <h1>{targetPracticeSign?.word || `${courseTitle(selectedCourse)} · ${selectedCourseEarned + 1}`}</h1>
                 <p>{targetPracticeSign?.description || t('practice.observeCopy')}</p>
-                <button className="primary-button practice-button" onClick={beginPractice}>{recoveryReviewSign ? t('practice.recoveryReady') : t('practice.readyToRepeat')}</button>
+                <button className="primary-button practice-button" onClick={beginPractice}>{t('practice.readyToRepeat')}</button>
+                <div className="practice-controls">
+                  <button className="ghost-button" onClick={deferCurrentLetter} disabled={learningQueue.length < 2}>{t('practice.nextManual')}</button>
+                  <button className="help-button" onClick={useHelpForCurrentLetter} disabled={remainingHelpCredits <= 0}>{t('practice.useHelp', { count: remainingHelpCredits })}</button>
+                </div>
               </> : <>
                 <div className={`camera-stage ${practiceStatus}`}>
                   <div className="camera-grid" aria-hidden="true" /><span className="camera-corner corner-one" /><span className="camera-corner corner-two" /><span className="camera-corner corner-three" /><span className="camera-corner corner-four" />
                   {cameraActive ? <video ref={videoRef} className="camera-video" autoPlay muted playsInline /> : <div className="sign-visual"><span>👋</span><i>✦</i><i>✦</i></div>}
                   {cameraActive && <div className="hand-guide" aria-hidden="true"><span>{t('practice.handZone')}</span></div>}
                   {practiceStatus === 'analyzing' && <div className="scanner-line" />}
-                  <div className="camera-status"><i /> {practiceStatus === 'analyzing' ? t('practice.analyzing') : practiceStatus === 'ready' ? t('practice.detected') : cameraActive ? t('practice.cameraActive') : t('practice.cameraReady')}</div>
+                  <div className="camera-status"><i /> {practiceStatus === 'analyzing' ? t('practice.analyzing') : practiceStatus === 'no-hand' ? t('practice.noHand') : practiceStatus === 'ready' ? t('practice.detected') : cameraActive ? t('practice.cameraActive') : t('practice.cameraReady')}</div>
                 </div>
                 <p className="eyebrow">{practiceMode === 'quiz' ? t('practice.quizEyebrow') : t('practice.reproduce')}</p>
                 <h1>{practiceMode === 'quiz' ? t('practice.finalTestPrompt', { label: targetPracticeSign?.modelLabel || '?', current: finalTestIndex + 1, total: finalTestSigns.length }) : targetPracticeSign?.word || `${courseTitle(selectedCourse)} · ${selectedCourseEarned + 1}`}</h1>
                 <p>{practiceMode === 'quiz' ? t('practice.quizCopy') : t('practice.copy')}</p>
                 <button className="primary-button practice-button" onClick={startAnalysis} disabled={cameraActive}>{cameraActive ? t('practice.autoActive') : t('practice.activate')}</button>
+                {practiceMode !== 'quiz' && <div className="practice-controls">
+                  <button className="ghost-button" onClick={deferCurrentLetter} disabled={learningQueue.length < 2}>{t('practice.nextManual')}</button>
+                  <button className="help-button" onClick={useHelpForCurrentLetter} disabled={remainingHelpCredits <= 0}>{t('practice.useHelp', { count: remainingHelpCredits })}</button>
+                </div>}
                 {failedAttempts > 0 && <small className="attempt-counter">{t('practice.attemptCounter', { count: failedAttempts })}</small>}
                 {showAsConfusionHint && <div className="confusion-hint"><span>👀</span><p>{t('practice.asConfusionHint')}</p></div>}
                 <small className="model-notice">{['J', 'Z'].includes(targetPracticeSign?.modelLabel || '') ? t('practice.motionNotice') : t('practice.modelNotice')}</small>
               </>}
             </div>
             <aside className="practice-side">
-              <div className="xp-badge">⚡ +20 XP</div>
-              {practiceMode === 'learn' ? <div className="lesson-steps"><h2>{t('practice.methodTitle')}</h2><p><b>1</b>{t('practice.methodObserve')}</p><p><b>2</b>{t('practice.methodRepeat')}</p><p><b>3</b>{t('practice.methodTest')}</p></div> : practiceStatus === 'ready' && prediction ? <><div className="score-ring" style={{ '--score': predictionScore } as CSSProperties}><strong>{predictionScore}%</strong><small>{t('practice.confidence')}</small></div><div className="analysis-checks"><p>{t('practice.predicted')} : <b>{prediction.label}</b></p>{expectedLabel && <p>{t('practice.expected')} : <b>{expectedLabel}</b></p>}{prediction.orientation && <p>{t('practice.orientationUsed')} : <b>{prediction.orientation === 'mirrored' ? t('practice.orientationMirrored') : t('practice.orientationOriginal')}</b></p>}{prediction.landmarkRefinement?.applied && <p>{t('practice.landmarkCorrection')} : <b>A/S</b></p>}<p className={predictionAccepted ? 'prediction-ok' : 'prediction-retry'}>{predictionAccepted ? t('practice.correct') : t('practice.incorrect')}</p></div>{predictionAccepted ? <button className="primary-button compact" onClick={practiceMode === 'quiz' ? advanceFinalTest : finishPracticeStep}>{practiceMode === 'quiz' ? isLastFinalTestSign ? t('practice.validateCourse') : t('practice.nextTestLetter') : recoveryReviewSign ? t('practice.recoveryReady') : isLastPracticeLetter ? t('practice.startFinalTest') : t('practice.finish')}</button> : <p className="retry-advice">{t('practice.retryAdvice')}</p>}</> : <><h2>{practiceMode === 'quiz' ? t('practice.finalTestTitle') : t('practice.goal')}</h2><p>{practiceMode === 'quiz' ? t('practice.finalTestGoal') : t('practice.goalCopy')}</p><div className="tip-card"><span>💡</span><p>{t('practice.tip')}</p></div></>}
+              <div className="practice-side-summary"><div className="xp-badge">⚡ +20 XP</div><div className="help-counter">💡 {t('practice.helpsRemaining', { count: remainingHelpCredits })}</div></div>
+              {practiceMode === 'learn' ? <div className="lesson-steps"><h2>{t('practice.methodTitle')}</h2><p><b>1</b>{t('practice.methodObserve')}</p><p><b>2</b>{t('practice.methodRepeat')}</p><p><b>3</b>{t('practice.methodTest')}</p><div className="tip-card"><span>💡</span><p>{t('practice.helpExplanation')}</p></div></div> : practiceStatus === 'ready' && prediction ? <><div className="score-ring" style={{ '--score': predictionScore } as CSSProperties}><strong>{predictionScore}%</strong><small>{t('practice.confidence')}</small></div><div className="analysis-checks"><p>{t('practice.predicted')} : <b>{prediction.label}</b></p>{expectedLabel && <p>{t('practice.expected')} : <b>{expectedLabel}</b></p>}{prediction.orientation && <p>{t('practice.orientationUsed')} : <b>{prediction.orientation === 'mirrored' ? t('practice.orientationMirrored') : t('practice.orientationOriginal')}</b></p>}{prediction.landmarkRefinement?.applied && <p>{t('practice.landmarkCorrection')} : <b>A/S</b></p>}<p className={predictionAccepted ? 'prediction-ok' : 'prediction-retry'}>{predictionAccepted ? t('practice.correct') : t('practice.incorrect')}</p></div>{predictionAccepted ? <button className="primary-button compact" onClick={practiceMode === 'quiz' ? advanceFinalTest : finishPracticeStep}>{practiceMode === 'quiz' ? isLastFinalTestSign ? t('practice.validateCourse') : t('practice.nextTestLetter') : isLastPracticeLetter ? t('practice.startFinalTest') : t('practice.finish')}</button> : <p className="retry-advice">{t('practice.retryAdvice')}</p>}</> : <><h2>{practiceMode === 'quiz' ? t('practice.finalTestTitle') : t('practice.goal')}</h2><p>{practiceMode === 'quiz' ? t('practice.finalTestGoal') : t('practice.goalCopy')}</p><div className="tip-card"><span>💡</span><p>{t('practice.tip')}</p></div></>}
             </aside>
           </section>
           {gestureReminderOpen && targetPracticeSign && <div className="gesture-reminder-overlay" role="dialog" aria-modal="true" aria-label={t('practice.reminderTitle')}>
-            <section className="gesture-reminder-card"><p className="eyebrow">{t('practice.reminderEyebrow')} · {t('practice.reminderCycle', { current: reminderCycles })}</p><h2>{t('practice.reminderTitle')}</h2><p>{t('practice.reminderCopy', { count: 6 })}</p><div className="reminder-gesture"><div className="reference-letter">{targetPracticeSign.modelLabel}</div>{targetPracticeSign.imageUrl && <img src={targetPracticeSign.imageUrl} alt={t('practice.referenceAlt', { label: targetPracticeSign.modelLabel })} onError={(event) => event.currentTarget.remove()} />}</div><strong>{t('practice.reminderLabel', { label: targetPracticeSign.modelLabel })}</strong>{showAsConfusionHint && <div className="confusion-hint modal-hint"><span>👀</span><p>{t('practice.asConfusionHint')}</p></div>}<button className="primary-button" onClick={resumeAfterReminder}>{reminderCycles >= 3 ? t('practice.deferAndReview', { label: targetPracticeSign.modelLabel }) : t('practice.resume')}</button></section>
+            <section className="gesture-reminder-card"><p className="eyebrow">{t('practice.reminderEyebrow')} · {t('practice.reminderCycle', { current: reminderCycles })}</p><h2>{t('practice.reminderTitle')}</h2><p>{t('practice.reminderCopy', { count: 6 })}</p><div className="reminder-gesture"><div className="reference-letter">{targetPracticeSign.modelLabel}</div>{targetPracticeSign.imageUrl && <img src={targetPracticeSign.imageUrl} alt={t('practice.referenceAlt', { label: targetPracticeSign.modelLabel })} onError={(event) => event.currentTarget.remove()} />}</div><strong>{t('practice.reminderLabel', { label: targetPracticeSign.modelLabel })}</strong>{showAsConfusionHint && <div className="confusion-hint modal-hint"><span>👀</span><p>{t('practice.asConfusionHint')}</p></div>}<button className="primary-button" onClick={resumeAfterReminder}>{reminderCycles >= 3 ? t('practice.deferAndContinue', { label: targetPracticeSign.modelLabel }) : t('practice.resume')}</button></section>
           </div>}
         </main>
       )}
@@ -766,7 +897,7 @@ function App() {
                     return <div className={`lesson-badge ${isEarned ? 'earned' : 'locked'}`} key={index}><span>{isEarned ? '★' : '🔒'}</span><b>{t('rewards.lessonBadge', { number: index + 1 })}</b><small>{isEarned ? t('rewards.earned') : t('rewards.locked')}</small></div>
                   })}
                 </div>
-                <div className={`course-certificate ${certificateUnlocked ? 'unlocked' : 'locked'}`}><span>{certificateUnlocked ? '📜' : '🔐'}</span><div><h3>{t('rewards.certificate')}</h3><p>{certificateUnlocked ? t('rewards.certificateReady') : t('rewards.certificateLocked', { remaining, plural: language !== 'ar' && remaining !== 1 ? 's' : '' })}</p></div>{certificateUnlocked && <button className="primary-button compact" onClick={() => setSelectedCertificate(course)}>{t('rewards.viewCertificate')}</button>}</div>
+                <div className={`course-certificate ${certificateUnlocked ? 'unlocked' : 'locked'}`}><span>{certificateUnlocked ? '📜' : '🔐'}</span><div><h3>{t('rewards.certificate')}</h3><p>{certificateUnlocked ? t('rewards.certificateReady') : t('rewards.certificateLocked', { remaining, plural: language !== 'ar' && remaining !== 1 ? 's' : '' })}</p></div>{certificateUnlocked && <button className="primary-button compact" disabled={certificateLoadingId === course.id} onClick={() => void openCertificate(course)}>{certificateLoadingId === course.id ? t('certificate.issuing') : t('rewards.viewCertificate')}</button>}</div>
               </article>
             })}
           </section> : <p>{t('rewards.empty')}</p>}
@@ -825,8 +956,24 @@ function App() {
 
       {selectedCertificate && <div className="certificate-overlay" role="dialog" aria-modal="true">
         <section className="certificate-sheet">
-          <div className="certificate-border"><img src={tunisignLogo} alt="TuniSign" /><p className="certificate-kicker">{t('certificate.awarded')}</p><h1>{courseTitle(selectedCertificate)}</h1><p>{t('certificate.certifies')}</p><h2>{account ? `${account.firstName} ${account.lastName}` : t('certificate.student')}</h2><p>{t('certificate.completed')}</p><strong>{courseTitle(selectedCertificate)}</strong><div className="certificate-seal">🏆<small>TuniSign</small></div><p className="certificate-date">{t('certificate.date', { date: new Intl.DateTimeFormat(language === 'ar' ? 'ar-TN' : language === 'en' ? 'en-GB' : 'fr-FR').format(new Date()) })}</p><div className="certificate-signature"><span /><b>TuniSign · SINA</b></div></div>
-          <div className="certificate-actions"><button className="ghost-button" onClick={() => setSelectedCertificate(null)}>{t('certificate.close')}</button><button className="primary-button compact" onClick={() => window.print()}>{t('certificate.print')}</button></div>
+          <div className="certificate-border">
+            <img src={tunisignLogo} alt="TuniSign" />
+            <p className="certificate-kicker">{t('certificate.awarded')}</p>
+            <h1>{selectedCertificate.credential.courseTitle || courseTitle(selectedCertificate.course)}</h1>
+            <p>{t('certificate.certifies')}</p>
+            <h2>{selectedCertificate.credential.studentName || t('certificate.student')}</h2>
+            <p>{t('certificate.completed')}</p>
+            <strong>{selectedCertificate.credential.courseTitle || courseTitle(selectedCertificate.course)}</strong>
+            <div className="certificate-seal">🏆<small>TuniSign</small></div>
+            <p className="certificate-date">{t('certificate.date', { date: selectedCertificate.credential.issuedAt ? new Intl.DateTimeFormat(language === 'ar' ? 'ar-TN' : language === 'en' ? 'en-GB' : 'fr-FR').format(new Date(selectedCertificate.credential.issuedAt)) : '—' })}</p>
+            <div className="certificate-proof">
+              <div className="certificate-signature"><span /><b>TuniSign · SINA</b><small>✓ {t('certificate.digitallySigned')} · {selectedCertificate.credential.signatureAlgorithm}</small></div>
+              {selectedCertificate.credential.qrCodeDataUrl && <a href={selectedCertificate.credential.verificationUrl} target="_blank" rel="noreferrer" className="certificate-qr"><img src={selectedCertificate.credential.qrCodeDataUrl} alt={t('certificate.qrAlt')} /><small>{t('certificate.scanQr')}</small></a>}
+            </div>
+            <p className="certificate-id">{t('certificate.verificationCode')} <code>{selectedCertificate.credential.verificationCode}</code></p>
+            <p className="certificate-fingerprint">{t('verification.fingerprint')} : {selectedCertificate.credential.publicKeyFingerprint}</p>
+          </div>
+          <div className="certificate-actions"><button className="ghost-button" onClick={() => setSelectedCertificate(null)}>{t('certificate.close')}</button><a className="ghost-button certificate-verify-link" href={selectedCertificate.credential.verificationUrl} target="_blank" rel="noreferrer">{t('certificate.verifyOnline')}</a><button className="primary-button compact" onClick={() => window.print()}>{t('certificate.print')}</button></div>
         </section>
       </div>}
     </div>

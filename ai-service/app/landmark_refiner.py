@@ -49,7 +49,7 @@ class AsLandmarkRefiner:
             return probabilities, diagnostics
 
         features = normalize_landmarks(landmarks, handedness)
-        prediction = np.asarray(self.model.predict(features[None, ...], verbose=0)[0], dtype=np.float32)
+        prediction = np.asarray(self.model(features[None, ...], training=False)[0], dtype=np.float32)
         if prediction.shape[0] != 2:
             diagnostics["error"] = "Le correcteur A/S doit avoir deux sorties"
             return probabilities, diagnostics
