@@ -45,12 +45,27 @@ Audit :
 .\.venv\Scripts\python.exe scripts\audit_model.py
 ```
 
-## 3. Collecter son propre dataset webcam
+## 3. Solution retenue : deux modèles TuniSign
+
+L'ancien dépôt de 44 classes ne contient ni les poids, ni les images d'entraînement. TuniSign utilise donc deux modèles entraînés avec la webcam de l'application :
+
+- `tunisign_static_v3.keras` : A-Z et chiffres 0-9 à partir d'images recadrées ;
+- `tunisign_words_v1.keras` : `BONJOUR`, `HI`, `THANK_YOU`, `I_LOVE_YOU` et `MERCI` à partir de séquences de points MediaPipe.
+
+Le service charge automatiquement ces modèles lorsqu'ils existent. `/health` expose `capabilities.alphabet`, `capabilities.numbers`, `capabilities.firstSigns` et `sequenceReady`. Le frontend garde chaque cours verrouillé tant que toutes ses classes ne sont pas réellement disponibles.
+
+## 4. Collecter son propre dataset webcam
 
 Commencer par A, puis recommencer pour chaque classe. Utiliser plusieurs utilisateurs, fonds, distances et éclairages.
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\collect_webcam.py --label A --target 200
+```
+
+Pour collecter les chiffres 0 à 9, démarrer sur 0 puis utiliser `N` pour passer au chiffre suivant :
+
+```powershell
+.\.venv\Scripts\python.exe scripts\collect_webcam.py --profile numbers --label 0 --target 300
 ```
 
 Touches de la fenêtre :
@@ -64,7 +79,7 @@ Les images recadrées sont placées dans `dataset/images/<classe>/`. Les 63 vale
 
 Recommandation minimale : 200 images par classe, au moins 3 personnes, 3 fonds et 3 niveaux d'éclairage. Pour `A/S` et `M/N/T`, viser 400 images par classe.
 
-## 4. Entraîner le correcteur A/S
+## 5. Entraîner le correcteur A/S
 
 Après avoir collecté au moins 30 exemples de A et de S :
 
@@ -74,7 +89,7 @@ Après avoir collecté au moins 30 exemples de A et de S :
 
 Redémarrer ensuite le service. `/health` doit afficher `asLandmarkRefiner: true`.
 
-## 5. Réentraîner le modèle d'images
+## 6. Réentraîner le modèle d'images
 
 Le profil par défaut `alphabet` entraîne uniquement les 26 lettres A–Z utilisées par les leçons. Les anciennes classes de contrôle `del`, `nothing` et `space` ne sont donc pas obligatoires.
 
@@ -90,23 +105,49 @@ Vérifier d'abord les images sans lancer TensorFlow :
 
 Pour reproduire explicitement l'ancien modèle à 29 classes, il faut collecter les trois classes de contrôle puis utiliser `--profile legacy29`. `--profile available` reste disponible pour un prototype incomplet.
 
+Après avoir collecté A-Z et 0-9, vérifier puis entraîner le modèle étendu sans écraser le modèle Alphabet actuel :
+
+```powershell
+.\.venv\Scripts\python.exe scripts\train_model.py --profile extended --check-only
+.\.venv\Scripts\python.exe scripts\train_model.py --profile extended --epochs 20 --fine-tune-epochs 8
+```
+
 Le script :
 
 - fixe explicitement `class_names` ;
 - génère `asl_recognition_model_v2.classes.json`, `asl_recognition_model_v2.labels.json` et les métadonnées liées au modèle ;
 - applique rotation, translation, zoom, contraste et miroir ;
 - augmente le poids de `A/S/M/N/T` ;
-- enregistre un modèle MobileNetV2 dans `models/asl_recognition_model_v2.keras` ;
+- enregistre le profil `extended` dans `models/tunisign_static_v3.keras` ;
 - marque l'ordre des classes comme vérifié.
 
-Au redémarrage, le service choisit automatiquement `asl_recognition_model_v2.keras` s'il existe. Pour forcer explicitement un autre modèle :
+Au redémarrage, le service choisit d'abord `tunisign_static_v3.keras`, puis l'ancien modèle étendu s'il est fourni, puis `asl_recognition_model_v2.keras`. Pour forcer explicitement un autre modèle :
 
 ```powershell
 $env:MODEL_PATH="models/asl_recognition_model_v2.keras"
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
 ```
 
-## 6. Évaluer les confusions
+## 7. Collecter et entraîner les expressions vidéo
+
+Lancer la collecte sur `BONJOUR`. `N` et `P` changent d'expression, `ESPACE` enregistre un clip et `A` active la collecte automatique :
+
+```powershell
+.\.venv\Scripts\python.exe scripts\collect_video.py --label BONJOUR --target 120
+```
+
+Utiliser au moins 3 personnes, plusieurs fonds et plusieurs distances. Chaque clip dure environ 2,5 secondes et contient 32 séries de 63 coordonnées normalisées.
+
+Vérifier puis entraîner le GRU :
+
+```powershell
+.\.venv\Scripts\python.exe scripts\train_sequence_model.py --check-only
+.\.venv\Scripts\python.exe scripts\train_sequence_model.py --epochs 60
+```
+
+Le modèle est enregistré dans `models/tunisign_words_v1.keras`. Le frontend capture automatiquement une séquence webcam et l'envoie à `/predict-sequence`.
+
+## 8. Évaluer les confusions
 
 Collecter des images indépendantes (nouvelle session, autres fonds et éclairages) dans `dataset/test/images/<classe>/`. Le script de collecte crée automatiquement cette structure :
 
@@ -122,7 +163,7 @@ Puis exécuter :
 
 Les résultats sont créés dans `reports/evaluation.json` et `reports/evaluation.csv`. Vérifier particulièrement `A↔S`, `M↔N`, `M↔T` et `N↔T`.
 
-## 7. Cas J et Z
+## 9. Cas J et Z
 
 J et Z comprennent un mouvement. Le classifieur d'image ne voit qu'une pose finale et ne peut donc pas les valider complètement. Ils sont déclarés dans `dynamicClasses` et la réponse `/predict` renvoie `motionRequired: true`.
 

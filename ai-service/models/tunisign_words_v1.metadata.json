@@ -1,0 +1,15 @@
+{
+  "modelVersion": "1.0",
+  "modelType": "landmark-sequence-gru",
+  "classOrderVerified": true,
+  "sequenceLength": 32,
+  "featureSize": 63,
+  "trainingClipCounts": {
+    "BONJOUR": 22,
+    "HI": 21,
+    "THANK_YOU": 21,
+    "I_LOVE_YOU": 22,
+    "MERCI": 20
+  },
+  "seed": 2026
+}

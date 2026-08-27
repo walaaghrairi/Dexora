@@ -26,18 +26,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data", type=Path, default=ROOT / "dataset", help="Racine du dataset")
     parser.add_argument(
         "--profile",
-        choices=("alphabet", "legacy29"),
+        choices=("alphabet", "numbers", "extended", "legacy29"),
         default="alphabet",
-        help="alphabet=A-Z (cours), legacy29=A-Z+del/nothing/space",
+        help="alphabet=A-Z, numbers=0-9, extended=A-Z+0-9, legacy29=ancien modèle",
     )
     return parser.parse_args()
 
 
 def load_labels(profile: str) -> list[str]:
-    with (ROOT / "models" / "labels.json").open(encoding="utf-8") as labels_file:
+    labels_path = ROOT / "models" / ("labels.json" if profile == "legacy29" else "static_labels.json")
+    with labels_path.open(encoding="utf-8") as labels_file:
         labels = json.load(labels_file)
     if profile == "alphabet":
         return [label for label in labels if len(label) == 1 and "A" <= label <= "Z"]
+    if profile == "numbers":
+        return [label for label in labels if label.isdigit()]
     return labels
 
 

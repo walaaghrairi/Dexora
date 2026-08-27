@@ -1,4 +1,4 @@
-import type { Account, AuthResponse, Category, CertificateCredential, Course, Sign, SignPrediction, TwoFactorSetup } from '../types/api'
+import type { Account, AiHealth, AuthResponse, Category, CertificateCredential, Course, EmailVerificationResponse, Sign, SignPrediction, TwoFactorSetup } from '../types/api'
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8081'
 const AI_URL = import.meta.env.VITE_AI_URL ?? 'http://localhost:8000'
@@ -27,6 +27,11 @@ async function request<T>(path: string, init?: RequestInit, authenticated = true
 }
 
 export const api = {
+  aiHealth: async (): Promise<AiHealth> => {
+    const response = await fetch(`${AI_URL}/health`)
+    if (!response.ok) throw new Error(`Service IA indisponible (${response.status})`)
+    return response.json() as Promise<AiHealth>
+  },
   categories: () => request<Category[]>('/categories'),
   courses: () => request<Course[]>('/courses'),
   signs: () => request<Sign[]>('/signs'),
@@ -39,9 +44,18 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ firstName, lastName, email, password }),
     }),
+  googleLogin: (credential: string) =>
+    request<AuthResponse>('/auth/google', { method: 'POST', body: JSON.stringify({ credential }) }, false),
+  verifyEmail: (token: string) =>
+    request<EmailVerificationResponse>(`/auth/email/verify?token=${encodeURIComponent(token)}`, undefined, false),
+  resendVerification: (email: string) =>
+    request<EmailVerificationResponse>('/auth/email/resend', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }, false),
   account: () => request<Account>('/account'),
-  updateAccount: (firstName: string, lastName: string, email: string) =>
-    request<Account>('/account', { method: 'PUT', body: JSON.stringify({ firstName, lastName, email }) }),
+  updateAccount: (firstName: string, lastName: string, email: string, avatarKey: Account['avatarKey']) =>
+    request<Account>('/account', { method: 'PUT', body: JSON.stringify({ firstName, lastName, email, avatarKey }) }),
   changePassword: (currentPassword: string, newPassword: string) =>
     request<void>('/account/password', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) }),
   setupTwoFactor: () => request<TwoFactorSetup>('/account/2fa/setup', { method: 'POST' }),
@@ -60,6 +74,16 @@ export const api = {
     if (!response.ok) {
       const payload = await response.json().catch(() => null) as { detail?: string } | null
       throw new Error(payload?.detail || `Service IA indisponible (${response.status})`)
+    }
+    return response.json() as Promise<SignPrediction>
+  },
+  predictSequence: async (images: Blob[]): Promise<SignPrediction> => {
+    const form = new FormData()
+    images.forEach((image, index) => form.append('images', image, `webcam-sequence-${index}.jpg`))
+    const response = await fetch(`${AI_URL}/predict-sequence`, { method: 'POST', body: form })
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { detail?: string } | null
+      throw new Error(payload?.detail || `Service vidéo IA indisponible (${response.status})`)
     }
     return response.json() as Promise<SignPrediction>
   },

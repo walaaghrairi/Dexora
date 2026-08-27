@@ -17,6 +17,19 @@ spring:
       hibernate:
         format_sql: true
 
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+
 server:
   port: 8081
   logging:
@@ -26,8 +39,14 @@ server:
       org.springframework.orm.jpa: DEBUG
 
 application:
+  frontend-base-url: ${FRONTEND_BASE_URL:http://localhost:5173}
   certificate:
     public-base-url: ${CERTIFICATE_PUBLIC_BASE_URL:http://localhost:5173}
   security:
+    google:
+      client-id: ${GOOGLE_CLIENT_ID:}
+    email-verification:
+      expiration-minutes: ${EMAIL_VERIFICATION_EXPIRATION_MINUTES:30}
+      expose-development-link: ${EMAIL_VERIFICATION_EXPOSE_DEV_LINK:true}
     jwt:
       secret-key: 404E635266556A586E3272357538782F413F4428472B4B6250655368566D5971

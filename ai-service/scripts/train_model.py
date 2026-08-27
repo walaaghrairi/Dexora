@@ -12,7 +12,7 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif"}
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Réentraînement reproductible du classifieur ASL TuniSign")
     parser.add_argument("--data", type=Path, default=ROOT / "dataset" / "images")
-    parser.add_argument("--output", type=Path, default=ROOT / "models" / "asl_recognition_model_v2.keras")
+    parser.add_argument("--output", type=Path, help="Chemin de sortie (choisi automatiquement selon le profil)")
     parser.add_argument("--epochs", type=int, default=15)
     parser.add_argument("--fine-tune-epochs", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=24)
@@ -21,9 +21,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--weights", choices=("imagenet", "none"), default="imagenet")
     parser.add_argument(
         "--profile",
-        choices=("alphabet", "legacy29", "available"),
+        choices=("alphabet", "numbers", "extended", "legacy29", "available"),
         default="alphabet",
-        help="alphabet=A-Z (cours), legacy29=A-Z+del/nothing/space, available=classes non vides",
+        help="alphabet=A-Z, numbers=0-9, extended=A-Z+0-9, legacy29=ancien modèle, available=classes non vides",
     )
     parser.add_argument(
         "--allow-partial",
@@ -38,9 +38,21 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def configured_labels() -> list[str]:
-    with (ROOT / "models" / "labels.json").open(encoding="utf-8") as labels_file:
+def configured_labels(profile: str) -> list[str]:
+    labels_path = ROOT / "models" / ("labels.json" if profile == "legacy29" else "static_labels.json")
+    with labels_path.open(encoding="utf-8") as labels_file:
         return json.load(labels_file)
+
+
+def default_output(profile: str) -> Path:
+    filenames = {
+        "alphabet": "asl_recognition_model_v2.keras",
+        "numbers": "tunisign_numbers_v1.keras",
+        "extended": "tunisign_static_v3.keras",
+        "legacy29": "tunisign_legacy29.keras",
+        "available": "tunisign_available.keras",
+    }
+    return ROOT / "models" / filenames[profile]
 
 
 def count_images(data_dir: Path, labels: list[str]) -> Counter:
@@ -60,6 +72,10 @@ def select_class_names(
 
     if profile == "alphabet":
         requested = [label for label in labels if len(label) == 1 and "A" <= label <= "Z"]
+    elif profile == "numbers":
+        requested = [label for label in labels if label.isdigit()]
+    elif profile == "extended":
+        requested = [label for label in labels if (len(label) == 1 and "A" <= label <= "Z") or label.isdigit()]
     elif profile == "legacy29":
         requested = labels
     else:
@@ -76,9 +92,10 @@ def main() -> None:
     if not 0 < args.validation_split < 1:
         raise SystemExit("--validation-split doit être compris entre 0 et 1.")
 
-    labels = configured_labels()
+    labels = configured_labels(args.profile)
     counts = count_images(args.data, labels)
     selected_profile = "available" if args.allow_partial else args.profile
+    output_path = args.output or default_output(selected_profile)
     class_names, missing = select_class_names(labels, counts, args.profile, args.allow_partial)
     if missing:
         raise SystemExit(
@@ -151,7 +168,7 @@ def main() -> None:
     )
 
     largest_class = max(counts[label] for label in class_names)
-    difficult = {"A", "S", "M", "N", "T"}
+    difficult = {"A", "S", "M", "N", "T", "1", "7", "2", "3", "6", "9"}
     class_weight = {
         index: min(4.0, largest_class / max(counts[label], 1) * (1.5 if label in difficult else 1.0))
         for index, label in enumerate(class_names)
@@ -185,13 +202,13 @@ def main() -> None:
             callbacks=callbacks,
         )
 
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    model.save(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    model.save(output_path)
     indices = {label: index for index, label in enumerate(class_names)}
-    args.output.with_suffix(".classes.json").write_text(
+    output_path.with_suffix(".classes.json").write_text(
         json.dumps(indices, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
-    args.output.with_suffix(".labels.json").write_text(
+    output_path.with_suffix(".labels.json").write_text(
         json.dumps(class_names, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     metadata = {
@@ -207,10 +224,10 @@ def main() -> None:
         "hardClasses": sorted(difficult.intersection(class_names)),
         "seed": args.seed,
     }
-    args.output.with_suffix(".metadata.json").write_text(
+    output_path.with_suffix(".metadata.json").write_text(
         json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
-    print(f"Modèle enregistré : {args.output}")
+    print(f"Modèle enregistré : {output_path}")
     print("Ordre exact :", indices)
 
 

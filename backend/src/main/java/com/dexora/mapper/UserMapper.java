@@ -32,6 +32,10 @@ public class UserMapper {
                 .email(entity.getEmail())
                 .role(entity.getRole())
                 .createdAt(entity.getCreatedAt())
+                .twoFactorEnabled(entity.isTwoFactorEnabled())
+                .avatarKey(entity.getAvatarKey())
+                .emailVerified(entity.isEmailVerified())
+                .authProvider(entity.getAuthProvider())
                 .build();
     }
 

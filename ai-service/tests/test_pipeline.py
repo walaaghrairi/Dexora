@@ -12,7 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from app.hand_preprocessing import normalize_landmarks  # noqa: E402
-from scripts.train_model import select_class_names  # noqa: E402
+from scripts.train_model import default_output, select_class_names  # noqa: E402
+from scripts.train_sequence_model import resize_sequence, stratified_split  # noqa: E402
 
 
 class PipelineConfigurationTests(unittest.TestCase):
@@ -54,6 +55,40 @@ class PipelineConfigurationTests(unittest.TestCase):
         _, missing = select_class_names(labels, counts, "legacy29", False)
 
         self.assertEqual(["del"], missing)
+
+    def test_numbers_and_extended_profiles_use_the_expected_classes(self) -> None:
+        labels = [*list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), *[str(value) for value in range(10)]]
+        counts = Counter({label: 10 for label in labels})
+
+        numbers, missing_numbers = select_class_names(labels, counts, "numbers", False)
+        extended, missing_extended = select_class_names(labels, counts, "extended", False)
+
+        self.assertEqual([str(value) for value in range(10)], numbers)
+        self.assertEqual(labels, extended)
+        self.assertEqual([], missing_numbers)
+        self.assertEqual([], missing_extended)
+        self.assertEqual("tunisign_static_v3.keras", default_output("extended").name)
+
+    def test_extended_model_mapping_matches_the_source_database(self) -> None:
+        indices = json.loads((ROOT / "models" / "cnn_model_keras2.classes.json").read_text(encoding="utf-8"))
+        ordered = [name for name, _ in sorted(indices.items(), key=lambda item: item[1])]
+
+        self.assertEqual(44, len(ordered))
+        self.assertEqual(list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), ordered[:26])
+        self.assertEqual([str(value) for value in range(10)], ordered[26:36])
+        self.assertEqual("I love you", ordered[-1])
+
+    def test_sequence_labels_and_resampling_are_stable(self) -> None:
+        labels = json.loads((ROOT / "models" / "sequence_labels.json").read_text(encoding="utf-8"))
+        source = np.arange(12 * 63, dtype=np.float32).reshape(12, 63)
+        resized = resize_sequence(source, 32)
+        targets = np.repeat(np.arange(5), 10)
+        train_indices, validation_indices = stratified_split(targets, 0.2, 2026)
+
+        self.assertEqual(["BONJOUR", "HI", "THANK_YOU", "I_LOVE_YOU", "MERCI"], labels)
+        self.assertEqual((32, 63), resized.shape)
+        self.assertEqual(40, len(train_indices))
+        self.assertEqual(10, len(validation_indices))
 
 
 if __name__ == "__main__":

@@ -7,14 +7,11 @@ import lombok.NoArgsConstructor;
 
 @Data
 @Builder
-@AllArgsConstructor
 @NoArgsConstructor
-public class AuthenticationResponse {
-    private String token;
-    private boolean twoFactorRequired;
-    private boolean emailVerificationRequired;
-    private boolean verificationEmailSent;
-    private String email;
+@AllArgsConstructor
+public class EmailVerificationResponse {
+    private boolean verified;
+    private boolean emailSent;
     private String message;
     private String developmentVerificationUrl;
 }

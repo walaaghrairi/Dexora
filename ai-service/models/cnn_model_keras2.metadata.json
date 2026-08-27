@@ -1,0 +1,7 @@
+{
+  "classOrderVerified": true,
+  "normalization": "none",
+  "preprocessing": "binary_otsu",
+  "source": "harshbg/Sign-Language-Interpreter-using-Deep-Learning gesture_db.db",
+  "dynamicClasses": []
+}

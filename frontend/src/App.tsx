@@ -1,36 +1,77 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, FormEvent } from 'react'
 import { api } from './services/api'
-import type { Account, Category, CertificateCredential, Course, Sign, SignPrediction, TwoFactorSetup } from './types/api'
+import type { Account, AiHealth, AuthResponse, Category, CertificateCredential, Course, Sign, SignPrediction, TwoFactorSetup } from './types/api'
+import { GoogleSignInButton } from './components/GoogleSignInButton'
 import tunisignLogo from './assets/tunisign-sina-logo.png'
 import { translate, type Language, type TranslationKey } from './i18n'
 
-type Page = 'home' | 'catalogue' | 'dashboard' | 'rewards' | 'settings' | 'auth' | 'practice' | 'twoFactor' | 'verifyCertificate'
+type Page = 'home' | 'catalogue' | 'dashboard' | 'rewards' | 'settings' | 'auth' | 'practice' | 'twoFactor' | 'emailPending' | 'verifyEmail' | 'verifyCertificate'
 type PracticeStatus = 'idle' | 'analyzing' | 'ready' | 'no-hand'
 type PracticeMode = 'learn' | 'practice' | 'quiz'
 type RewardType = 'badge' | 'certificate'
 
 const AUTO_ANALYSIS_INTERVAL_MS = 900
+const SEQUENCE_ANALYSIS_INTERVAL_MS = 180
+const SEQUENCE_CAPTURE_FRAMES = 16
 const STABLE_FRAME_COUNT = 2
 const ACCEPTANCE_CONFIDENCE = 0.4
 const MAX_CAPTURE_EDGE = 640
 const COURSE_HELP_LIMIT = 4
+const SEQUENCE_LABELS = new Set(['BONJOUR', 'HI', 'THANK_YOU', 'I_LOVE_YOU', 'MERCI'])
+const AVATAR_OPTIONS: Array<{ key: Account['avatarKey']; emoji: string }> = [
+  { key: 'signer', emoji: '🤟' },
+  { key: 'scholar', emoji: '🧑‍🎓' },
+  { key: 'explorer', emoji: '😎' },
+]
+
+function normalizeAvatar(value?: string): Account['avatarKey'] {
+  return AVATAR_OPTIONS.some((avatar) => avatar.key === value) ? value as Account['avatarKey'] : 'signer'
+}
+
+function UserAvatar({ avatarKey, initials, className }: { avatarKey?: string; initials: string; className: string }) {
+  const avatar = AVATAR_OPTIONS.find((option) => option.key === normalizeAvatar(avatarKey)) || AVATAR_OPTIONS[0]
+  return <div className={`${className} user-avatar`} data-avatar={avatar.key} aria-label={`Avatar ${avatar.key}`}><span>{avatar.emoji}</span><small>{initials}</small></div>
+}
 
 function initialPage(): Page {
-  return window.location.pathname.startsWith('/verify-certificate/') ? 'verifyCertificate' : 'home'
+  if (window.location.pathname.startsWith('/verify-certificate/')) return 'verifyCertificate'
+  if (window.location.pathname === '/verify-email') return 'verifyEmail'
+  return 'home'
+}
+
+function isSequenceModelLabel(value?: string) {
+  return SEQUENCE_LABELS.has(value?.trim().toUpperCase() || '')
 }
 
 const demoCategories: Category[] = [
+  { id: 100, name: 'Salutations', description: 'Des expressions simples reconnues par le modèle étendu.' },
   { id: 101, name: 'Alphabet ASL', description: 'Les 26 lettres reconnues par le modèle actuel.' },
-  { id: 102, name: 'Chiffres', description: 'Disponible avec le prochain modèle de reconnaissance.' },
+  { id: 102, name: 'Chiffres', description: 'Les chiffres ASL de 0 à 9.' },
 ]
 
 const demoCourses: Course[] = [
+  { id: 100, title: 'Premiers signes', description: '5 expressions vidéo guidées pour commencer à communiquer.', categoryId: 100 },
   { id: 101, title: 'Alphabet A–Z', description: 'Observe, reproduis puis valide les 26 lettres avec un mini-test.', categoryId: 101 },
-  { id: 102, title: 'Chiffres ASL', description: 'Bientôt disponible avec un modèle entraîné sur les chiffres.', categoryId: 102 },
+  { id: 102, title: 'Chiffres ASL', description: '10 leçons guidées pour maîtriser les chiffres de 0 à 9.', categoryId: 102 },
 ]
 
-const demoSigns: Sign[] = Array.from({ length: 26 }, (_, index) => {
+const demoFirstSigns: Sign[] = [
+  ['Bonjour', 'BONJOUR', 'Observe puis reproduis le geste Bonjour.'],
+  ['Salut / Hi', 'HI', 'Observe puis reproduis le geste Salut.'],
+  ['Thank you', 'THANK_YOU', 'Observe puis reproduis le geste Thank you.'],
+  ["Je t'aime", 'I_LOVE_YOU', "Observe puis reproduis le geste Je t'aime."],
+  ['Merci', 'MERCI', 'Observe puis reproduis le geste Merci.'],
+].map(([word, modelLabel, description], index) => ({
+  id: 901 + index,
+  word,
+  modelLabel,
+  description,
+  difficulty: 'DEBUTANT',
+  courseId: 100,
+}))
+
+const demoAlphabetSigns: Sign[] = Array.from({ length: 26 }, (_, index) => {
   const letter = String.fromCharCode(65 + index)
   return {
     id: 1001 + index,
@@ -43,12 +84,34 @@ const demoSigns: Sign[] = Array.from({ length: 26 }, (_, index) => {
   }
 })
 
+const demoNumberSigns: Sign[] = Array.from({ length: 10 }, (_, value) => ({
+  id: 1101 + value,
+  word: `Chiffre ${value}`,
+  description: `Observe la position des doigts, puis reproduis le chiffre ${value}.`,
+  difficulty: 'DEBUTANT',
+  modelLabel: String(value),
+  courseId: 102,
+}))
+
+const demoSigns: Sign[] = [...demoFirstSigns, ...demoAlphabetSigns, ...demoNumberSigns]
+
+function compareLessonSigns(first: Sign, second: Sign) {
+  if (/^\d$/.test(first.modelLabel) && /^\d$/.test(second.modelLabel)) {
+    return Number(first.modelLabel) - Number(second.modelLabel)
+  }
+  if (/^[A-Z]$/.test(first.modelLabel) && /^[A-Z]$/.test(second.modelLabel)) {
+    return first.modelLabel.localeCompare(second.modelLabel)
+  }
+  return first.id - second.id
+}
+
 function App() {
   const [page, setPage] = useState<Page>(initialPage)
   const [categories, setCategories] = useState<Category[]>([])
   const [courses, setCourses] = useState<Course[]>([])
   const [signs, setSigns] = useState<Sign[]>([])
   const [usesDemoData, setUsesDemoData] = useState(false)
+  const [aiHealth, setAiHealth] = useState<AiHealth | null>(null)
   const [loading, setLoading] = useState(true)
   const [notice, setNotice] = useState('')
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null)
@@ -56,8 +119,13 @@ function App() {
   const [isRegistering, setIsRegistering] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(localStorage.getItem('tunisign_token')))
   const [account, setAccount] = useState<Account | null>(null)
+  const [selectedAvatar, setSelectedAvatar] = useState<Account['avatarKey']>('signer')
   const [twoFactorSetup, setTwoFactorSetup] = useState<TwoFactorSetup | null>(null)
   const [pendingTwoFactorEmail, setPendingTwoFactorEmail] = useState('')
+  const [pendingVerificationEmail, setPendingVerificationEmail] = useState('')
+  const [developmentVerificationUrl, setDevelopmentVerificationUrl] = useState('')
+  const [emailVerificationState, setEmailVerificationState] = useState<'loading' | 'success' | 'error'>(page === 'verifyEmail' ? 'loading' : 'success')
+  const [emailVerificationMessage, setEmailVerificationMessage] = useState('')
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('tunisign_theme') === 'dark')
   const [practiceStatus, setPracticeStatus] = useState<PracticeStatus>('idle')
   const [practiceMode, setPracticeMode] = useState<PracticeMode>('learn')
@@ -76,6 +144,7 @@ function App() {
   const streamRef = useRef<MediaStream | null>(null)
   const analysisInFlightRef = useRef(false)
   const recentPredictionsRef = useRef<Array<{ label: string; confidence: number }>>([])
+  const sequenceFramesRef = useRef<Blob[]>([])
   const expectedLabelRef = useRef('')
   const autoRecognitionPausedRef = useRef(false)
   const [celebrationOpen, setCelebrationOpen] = useState(false)
@@ -94,6 +163,10 @@ function App() {
   })
 
   const t = (key: TranslationKey, values?: Record<string, string | number>) => translate(language, key, values)
+
+  useEffect(() => {
+    setSelectedAvatar(normalizeAvatar(account?.avatarKey))
+  }, [account?.avatarKey])
 
   useEffect(() => {
     localStorage.setItem('tunisign_language', language)
@@ -127,6 +200,30 @@ function App() {
       }))
       .finally(() => setVerificationLoading(false))
   }, [page])
+
+  useEffect(() => {
+    if (page !== 'verifyEmail') return
+    const token = new URLSearchParams(window.location.search).get('token')
+    if (!token) {
+      setEmailVerificationState('error')
+      setEmailVerificationMessage(translate(language, 'emailVerify.invalid'))
+      return
+    }
+    setEmailVerificationState('loading')
+    api.verifyEmail(token)
+      .then((response) => {
+        setEmailVerificationState('success')
+        setEmailVerificationMessage(response.message || translate(language, 'emailVerify.successCopy'))
+      })
+      .catch(() => {
+        setEmailVerificationState('error')
+        setEmailVerificationMessage(translate(language, 'emailVerify.invalid'))
+      })
+  }, [language, page])
+
+  useEffect(() => {
+    api.aiHealth().then(setAiHealth).catch(() => setAiHealth(null))
+  }, [])
 
   useEffect(() => {
     Promise.allSettled([api.categories(), api.courses(), api.signs()])
@@ -214,7 +311,7 @@ function App() {
   const earnedBadgeCount = Object.values(courseBadgeProgress).reduce((total, value) => total + value, 0)
   const earnedCertificateCount = courses.filter((course) => (courseBadgeProgress[course.id] ?? 0) >= badgeTotal(course)).length
   const selectedCourseSigns = selectedCourse
-    ? signs.filter((sign) => sign.courseId === selectedCourse.id).sort((a, b) => a.modelLabel.localeCompare(b.modelLabel))
+    ? signs.filter((sign) => sign.courseId === selectedCourse.id).sort(compareLessonSigns)
     : []
   const selectedCourseEarned = selectedCourse ? courseBadgeProgress[selectedCourse.id] ?? 0 : 0
   const selectedCourseComplete = selectedCourse ? selectedCourseEarned >= badgeTotal(selectedCourse) : false
@@ -228,6 +325,7 @@ function App() {
   useEffect(() => {
     expectedLabelRef.current = targetPracticeSign?.modelLabel?.trim().toLocaleLowerCase() || ''
     recentPredictionsRef.current = []
+    sequenceFramesRef.current = []
     autoRecognitionPausedRef.current = false
     setFailedAttempts(0)
     setReminderCycles(0)
@@ -260,9 +358,23 @@ function App() {
       const image = await new Promise<Blob>((resolve, reject) => {
         canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Capture impossible')), 'image/jpeg', 0.9)
       })
-      const result = await api.predictSign(image)
+      const sequenceMode = isSequenceModelLabel(expectedLabelRef.current)
+      let result: SignPrediction
+      if (sequenceMode) {
+        const frames = [...sequenceFramesRef.current, image].slice(-SEQUENCE_CAPTURE_FRAMES)
+        sequenceFramesRef.current = frames
+        if (frames.length < SEQUENCE_CAPTURE_FRAMES) {
+          setPracticeStatus('analyzing')
+          return
+        }
+        result = await api.predictSequence(frames)
+        sequenceFramesRef.current = frames.slice(-Math.floor(SEQUENCE_CAPTURE_FRAMES / 2))
+      } else {
+        result = await api.predictSign(image)
+      }
       if (result.status === 'no_hand' || !result.handDetected) {
         recentPredictionsRef.current = []
+        if (sequenceMode) sequenceFramesRef.current = []
         setPrediction(null)
         setPracticeStatus('no-hand')
         return
@@ -319,9 +431,12 @@ function App() {
   useEffect(() => {
     if (!cameraActive || practiceMode === 'learn') return
     void analyzeCurrentFrame()
-    const interval = window.setInterval(() => void analyzeCurrentFrame(), AUTO_ANALYSIS_INTERVAL_MS)
+    const intervalMs = isSequenceModelLabel(targetPracticeSign?.modelLabel)
+      ? SEQUENCE_ANALYSIS_INTERVAL_MS
+      : AUTO_ANALYSIS_INTERVAL_MS
+    const interval = window.setInterval(() => void analyzeCurrentFrame(), intervalMs)
     return () => window.clearInterval(interval)
-  }, [analyzeCurrentFrame, cameraActive, practiceMode, targetPracticeSign?.id])
+  }, [analyzeCurrentFrame, cameraActive, practiceMode, targetPracticeSign?.id, targetPracticeSign?.modelLabel])
 
   function categoryLabel(category: Category) {
     const keys: Record<string, TranslationKey> = { Salutations: 'category.greetings', 'Vie quotidienne': 'category.daily', 'Vocabulaire médical': 'category.medical' }
@@ -345,12 +460,14 @@ function App() {
 
   function isCourseAvailable(course: Course) {
     const courseSigns = signs.filter((sign) => sign.courseId === course.id)
-    return courseSigns.length > 0 && courseSigns.every((sign) => /^[A-Z]$/.test(sign.modelLabel))
+    if (!aiHealth?.ready || courseSigns.length === 0) return false
+    const supportedLabels = new Set(aiHealth.classes.map((label) => label.trim().toLocaleLowerCase()))
+    return courseSigns.every((sign) => supportedLabels.has(sign.modelLabel.trim().toLocaleLowerCase()))
   }
 
   function navigate(nextPage: Page) {
     setNotice('')
-    if (window.location.pathname.startsWith('/verify-certificate/')) {
+    if (window.location.pathname.startsWith('/verify-certificate/') || window.location.pathname === '/verify-email') {
       window.history.pushState({}, '', '/')
     }
     setPage(nextPage)
@@ -383,7 +500,7 @@ function App() {
   function startLesson(course: Course) {
     const orderedSigns = signs
       .filter((sign) => sign.courseId === course.id)
-      .sort((a, b) => a.modelLabel.localeCompare(b.modelLabel))
+      .sort(compareLessonSigns)
     const earned = courseBadgeProgress[course.id] ?? 0
     setSelectedCourse(course)
     setLearningQueue(orderedSigns.slice(earned))
@@ -582,6 +699,27 @@ function App() {
     setCelebrationOpen(true)
   }
 
+  function completeAuthentication(response: AuthResponse, fallbackEmail = '') {
+    if (response.emailVerificationRequired) {
+      setPendingVerificationEmail(response.email || fallbackEmail)
+      setDevelopmentVerificationUrl(response.developmentVerificationUrl || '')
+      navigate('emailPending')
+      setNotice(response.message || t('notice.emailVerificationRequired'))
+      return
+    }
+    if (response.twoFactorRequired && response.email) {
+      setPendingTwoFactorEmail(response.email)
+      navigate('twoFactor')
+      setNotice(t('notice.twoFactorProtected'))
+      return
+    }
+    if (!response.token) throw new Error(t('notice.loginError'))
+    localStorage.setItem('tunisign_token', response.token)
+    setIsAuthenticated(true)
+    navigate('dashboard')
+    setNotice(t('notice.loginWelcome'))
+  }
+
   async function submitAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const data = new FormData(event.currentTarget)
@@ -591,24 +729,34 @@ function App() {
       const response = isRegistering
         ? await api.register(String(data.get('firstName')), String(data.get('lastName')), email, password)
         : await api.login(email, password)
-      if (response.twoFactorRequired && response.email) {
-        setPendingTwoFactorEmail(response.email)
-        navigate('twoFactor')
-        setNotice(t('notice.twoFactorProtected'))
-        return
-      }
-      if (!response.token) throw new Error(t('notice.loginError'))
-      localStorage.setItem('tunisign_token', response.token)
-      setIsAuthenticated(true)
-      navigate('dashboard')
-      setNotice(t('notice.loginWelcome'))
+      completeAuthentication(response, email)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : t('notice.loginError'))
     }
   }
 
+  async function authenticateWithGoogle(credential: string) {
+    try {
+      completeAuthentication(await api.googleLogin(credential))
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : t('notice.googleLoginError'))
+    }
+  }
+
+  async function resendVerificationEmail() {
+    if (!pendingVerificationEmail) return
+    try {
+      const response = await api.resendVerification(pendingVerificationEmail)
+      setDevelopmentVerificationUrl(response.developmentVerificationUrl || '')
+      setNotice(response.emailSent ? t('notice.emailSent') : t('notice.devEmailReady'))
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : t('notice.emailResendError'))
+    }
+  }
+
   function logout() {
     localStorage.removeItem('tunisign_token')
+    window.google?.accounts.id.disableAutoSelect()
     setIsAuthenticated(false)
     navigate('home')
     setNotice(t('notice.logout'))
@@ -629,7 +777,12 @@ function App() {
     event.preventDefault()
     const data = new FormData(event.currentTarget)
     try {
-      const updated = await api.updateAccount(String(data.get('firstName')), String(data.get('lastName')), String(data.get('email')))
+      const updated = await api.updateAccount(
+        String(data.get('firstName')),
+        String(data.get('lastName')),
+        String(data.get('email')),
+        normalizeAvatar(String(data.get('avatarKey'))),
+      )
       setAccount(updated); setNotice(t('notice.profileSaved'))
     } catch { setNotice(t('notice.profileError')) }
   }
@@ -798,9 +951,9 @@ function App() {
               {practiceMode === 'learn' ? <>
                 <div className="reference-stage">
                   <span className="step-pill">{t('practice.stepObserve')}</span>
-                  <div className="reference-letter">{targetPracticeSign?.modelLabel}</div>
+                  <div className="reference-letter">{isSequenceModelLabel(targetPracticeSign?.modelLabel) ? '🎬' : targetPracticeSign?.modelLabel}</div>
                   {targetPracticeSign?.imageUrl && <img src={targetPracticeSign.imageUrl} alt={t('practice.referenceAlt', { label: targetPracticeSign.modelLabel })} onError={(event) => event.currentTarget.remove()} />}
-                  <strong>{targetPracticeSign?.modelLabel}</strong>
+                  <strong>{isSequenceModelLabel(targetPracticeSign?.modelLabel) ? targetPracticeSign?.word : targetPracticeSign?.modelLabel}</strong>
                 </div>
                 <p className="eyebrow">{t('practice.observe')}</p>
                 <h1>{targetPracticeSign?.word || `${courseTitle(selectedCourse)} · ${selectedCourseEarned + 1}`}</h1>
@@ -828,7 +981,7 @@ function App() {
                 </div>}
                 {failedAttempts > 0 && <small className="attempt-counter">{t('practice.attemptCounter', { count: failedAttempts })}</small>}
                 {showAsConfusionHint && <div className="confusion-hint"><span>👀</span><p>{t('practice.asConfusionHint')}</p></div>}
-                <small className="model-notice">{['J', 'Z'].includes(targetPracticeSign?.modelLabel || '') ? t('practice.motionNotice') : t('practice.modelNotice')}</small>
+                <small className="model-notice">{isSequenceModelLabel(targetPracticeSign?.modelLabel) ? t('practice.sequenceNotice') : ['J', 'Z'].includes(targetPracticeSign?.modelLabel || '') ? t('practice.motionNotice') : t('practice.modelNotice')}</small>
               </>}
             </div>
             <aside className="practice-side">
@@ -837,7 +990,7 @@ function App() {
             </aside>
           </section>
           {gestureReminderOpen && targetPracticeSign && <div className="gesture-reminder-overlay" role="dialog" aria-modal="true" aria-label={t('practice.reminderTitle')}>
-            <section className="gesture-reminder-card"><p className="eyebrow">{t('practice.reminderEyebrow')} · {t('practice.reminderCycle', { current: reminderCycles })}</p><h2>{t('practice.reminderTitle')}</h2><p>{t('practice.reminderCopy', { count: 6 })}</p><div className="reminder-gesture"><div className="reference-letter">{targetPracticeSign.modelLabel}</div>{targetPracticeSign.imageUrl && <img src={targetPracticeSign.imageUrl} alt={t('practice.referenceAlt', { label: targetPracticeSign.modelLabel })} onError={(event) => event.currentTarget.remove()} />}</div><strong>{t('practice.reminderLabel', { label: targetPracticeSign.modelLabel })}</strong>{showAsConfusionHint && <div className="confusion-hint modal-hint"><span>👀</span><p>{t('practice.asConfusionHint')}</p></div>}<button className="primary-button" onClick={resumeAfterReminder}>{reminderCycles >= 3 ? t('practice.deferAndContinue', { label: targetPracticeSign.modelLabel }) : t('practice.resume')}</button></section>
+            <section className="gesture-reminder-card"><p className="eyebrow">{t('practice.reminderEyebrow')} · {t('practice.reminderCycle', { current: reminderCycles })}</p><h2>{t('practice.reminderTitle')}</h2><p>{t('practice.reminderCopy', { count: 6 })}</p><div className="reminder-gesture"><div className="reference-letter">{isSequenceModelLabel(targetPracticeSign.modelLabel) ? '🎬' : targetPracticeSign.modelLabel}</div>{targetPracticeSign.imageUrl && <img src={targetPracticeSign.imageUrl} alt={t('practice.referenceAlt', { label: targetPracticeSign.modelLabel })} onError={(event) => event.currentTarget.remove()} />}</div><strong>{t('practice.reminderLabel', { label: targetPracticeSign.word || targetPracticeSign.modelLabel })}</strong>{showAsConfusionHint && <div className="confusion-hint modal-hint"><span>👀</span><p>{t('practice.asConfusionHint')}</p></div>}<button className="primary-button" onClick={resumeAfterReminder}>{reminderCycles >= 3 ? t('practice.deferAndContinue', { label: targetPracticeSign.modelLabel }) : t('practice.resume')}</button></section>
           </div>}
         </main>
       )}
@@ -845,7 +998,7 @@ function App() {
       {page === 'dashboard' && (
         <main className="content-page">
           <section className="profile-hero">
-            <div className="profile-avatar">{account ? `${account.firstName.slice(0, 1)}${account.lastName.slice(0, 1)}` : 'TS'}</div>
+            <UserAvatar avatarKey={account?.avatarKey} initials={account ? `${account.firstName.slice(0, 1)}${account.lastName.slice(0, 1)}` : 'TS'} className="profile-avatar" />
             <div className="profile-summary"><p className="eyebrow">{t('dashboard.welcome')}</p><h1>{account ? `${account.firstName} ${account.lastName}` : t('dashboard.progress')}</h1><p>{account?.email || t('dashboard.loginCopy')}</p><div className="profile-tags"><span className="flame-tag">{t('dashboard.streak', { count: sessionStreak, plural: language === 'fr' && sessionStreak > 1 ? 's' : '' })}</span><span>⚡ {sessionXp} XP</span><span>{t('dashboard.secure')}</span></div></div>
             {isAuthenticated && <button className="settings-button" onClick={() => navigate('settings')}>{t('dashboard.settings')}</button>}
           </section>
@@ -907,10 +1060,10 @@ function App() {
       {page === 'settings' && (
         <main className="content-page settings-page">
           <button className="back-button" onClick={() => navigate('dashboard')}>{t('settings.back')}</button>
-          <div className="section-heading"><div><p className="eyebrow">{t('settings.eyebrow')}</p><h2>{t('settings.title')}</h2></div>{account && <div className="account-avatar">{account.firstName.slice(0, 1)}{account.lastName.slice(0, 1)}</div>}</div>
+          <div className="section-heading"><div><p className="eyebrow">{t('settings.eyebrow')}</p><h2>{t('settings.title')}</h2></div>{account && <UserAvatar avatarKey={selectedAvatar} initials={`${account.firstName.slice(0, 1)}${account.lastName.slice(0, 1)}`} className="account-avatar" />}</div>
           {account ? <div className="account-grid">
-              <form className="account-card" onSubmit={updateProfile}><h3>{t('settings.personal')}</h3><p>{t('settings.personalCopy')}</p><div className="form-row"><label>{t('settings.firstName')}<input name="firstName" defaultValue={account.firstName} required /></label><label>{t('settings.lastName')}<input name="lastName" defaultValue={account.lastName} required /></label></div><label>{t('settings.email')}<input name="email" type="email" defaultValue={account.email} required /></label><button className="primary-button compact" type="submit">{t('settings.save')}</button></form>
-              <form className="account-card" onSubmit={updatePassword}><h3>{t('settings.password')}</h3><p>{t('settings.passwordCopy')}</p><label>{t('settings.currentPassword')}<input name="currentPassword" type="password" required /></label><label>{t('settings.newPassword')}<input name="newPassword" type="password" minLength={8} required /></label><button className="primary-button compact" type="submit">{t('settings.changePassword')}</button></form>
+              <form className="account-card profile-account-card" onSubmit={updateProfile}><h3>{t('settings.personal')}</h3><p>{t('settings.personalCopy')}</p><fieldset className="avatar-picker"><legend>{t('settings.avatarTitle')}</legend><p>{t('settings.avatarCopy')}</p><div className="avatar-options">{AVATAR_OPTIONS.map((avatar) => <label className={`avatar-option ${selectedAvatar === avatar.key ? 'selected' : ''}`} key={avatar.key}><input type="radio" name="avatarKey" value={avatar.key} checked={selectedAvatar === avatar.key} onChange={() => setSelectedAvatar(avatar.key)} /><UserAvatar avatarKey={avatar.key} initials={`${account.firstName.slice(0, 1)}${account.lastName.slice(0, 1)}`} className="avatar-choice-preview" /><span>{t(`settings.avatar${avatar.key.charAt(0).toUpperCase()}${avatar.key.slice(1)}` as TranslationKey)}</span><i>{selectedAvatar === avatar.key ? '✓' : ''}</i></label>)}</div></fieldset><div className="form-row"><label>{t('settings.firstName')}<input name="firstName" defaultValue={account.firstName} required /></label><label>{t('settings.lastName')}<input name="lastName" defaultValue={account.lastName} required /></label></div><label>{t('settings.email')}<input name="email" type="email" defaultValue={account.email} readOnly required /></label><div className="email-status verified"><span>✓</span><div><b>{t('settings.emailVerified')}</b><small>{account.authProvider === 'GOOGLE' ? t('settings.googleAccount') : t('settings.emailLocked')}</small></div></div><button className="primary-button compact" type="submit">{t('settings.save')}</button></form>
+              {account.authProvider !== 'GOOGLE' ? <form className="account-card" onSubmit={updatePassword}><h3>{t('settings.password')}</h3><p>{t('settings.passwordCopy')}</p><label>{t('settings.currentPassword')}<input name="currentPassword" type="password" required /></label><label>{t('settings.newPassword')}<input name="newPassword" type="password" minLength={8} required /></label><button className="primary-button compact" type="submit">{t('settings.changePassword')}</button></form> : <article className="account-card google-account-card"><span className="google-account-icon">G</span><div><h3>{t('settings.googleLinked')}</h3><p>{t('settings.googleLinkedCopy')}</p></div></article>}
               <article className="account-card two-factor-card"><div className="two-factor-title"><span>🔐</span><div><h3>Google Authenticator</h3><p>{account.twoFactorEnabled ? t('settings.twoFactorOn') : t('settings.twoFactorOff')}</p></div></div>{!account.twoFactorEnabled && !twoFactorSetup && <button className="primary-button compact" onClick={setupTwoFactor}>{t('settings.configure2fa')}</button>}{twoFactorSetup && <form className="two-factor-setup" onSubmit={enableTwoFactor}><p>{t('settings.manualKey')}</p><code>{twoFactorSetup.secret}</code><small>{t('settings.account')} : {account.email} · {t('settings.timeBased')}</small><label>{t('settings.sixDigit')}<input name="code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} placeholder="123456" required /></label><button className="primary-button compact" type="submit">{t('settings.enable2fa')}</button></form>}</article>
             </div>
           : <p>{t('settings.loading')}</p>}
@@ -925,10 +1078,38 @@ function App() {
             <form onSubmit={submitAuth}>
               {isRegistering && <div className="form-row"><label>{t('settings.firstName')}<input required name="firstName" /></label><label>{t('settings.lastName')}<input required name="lastName" /></label></div>}
               <label>{t('auth.email')}<input required type="email" name="email" placeholder="nom@exemple.com" /></label>
-              <label>{t('auth.password')}<input required minLength={6} type="password" name="password" placeholder={t('auth.passwordPlaceholder')} /></label>
+              <label>{t('auth.password')}<input required minLength={8} type="password" name="password" placeholder={t('auth.passwordPlaceholder')} /></label>
               <button className="primary-button" type="submit">{isRegistering ? t('auth.create') : t('auth.connection')}</button>
             </form>
+            <div className="auth-divider"><span>{t('auth.or')}</span></div>
+            <GoogleSignInButton language={language} mode={isRegistering ? 'signup' : 'signin'} darkMode={darkMode} onCredential={(credential) => void authenticateWithGoogle(credential)} onError={(message) => setNotice(message)} />
             <button className="text-button" onClick={() => setIsRegistering(!isRegistering)}>{isRegistering ? t('auth.haveAccount') : t('auth.createAccount')}</button>
+          </section>
+        </main>
+      )}
+
+      {page === 'emailPending' && (
+        <main className="auth-page">
+          <section className="auth-card verification-card">
+            <div className="security-icon">✉️</div>
+            <p className="eyebrow">{t('emailPending.eyebrow')}</p>
+            <h1>{t('emailPending.title')}</h1>
+            <p>{t('emailPending.copy')} <strong>{pendingVerificationEmail}</strong>.</p>
+            {developmentVerificationUrl && <a className="development-link" href={developmentVerificationUrl}>{t('emailPending.devLink')}</a>}
+            <button className="primary-button" onClick={() => void resendVerificationEmail()}>{t('emailPending.resend')}</button>
+            <button className="text-button" onClick={() => { setIsRegistering(false); navigate('auth') }}>{t('emailPending.back')}</button>
+          </section>
+        </main>
+      )}
+
+      {page === 'verifyEmail' && (
+        <main className="auth-page">
+          <section className={`auth-card verification-card ${emailVerificationState}`}>
+            <div className="security-icon">{emailVerificationState === 'loading' ? '⌛' : emailVerificationState === 'success' ? '✅' : '⚠️'}</div>
+            <p className="eyebrow">{t('emailVerify.eyebrow')}</p>
+            <h1>{emailVerificationState === 'loading' ? t('emailVerify.loading') : emailVerificationState === 'success' ? t('emailVerify.success') : t('emailVerify.error')}</h1>
+            <p>{emailVerificationMessage || t('emailVerify.loadingCopy')}</p>
+            {emailVerificationState !== 'loading' && <button className="primary-button" onClick={() => { setIsRegistering(false); navigate('auth') }}>{t('emailVerify.login')}</button>}
           </section>
         </main>
       )}

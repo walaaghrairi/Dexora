@@ -23,7 +23,22 @@ export type Sign = {
   courseId?: number
 }
 
-export type AuthResponse = { token?: string; twoFactorRequired?: boolean; email?: string }
+export type AuthResponse = {
+  token?: string
+  twoFactorRequired?: boolean
+  emailVerificationRequired?: boolean
+  verificationEmailSent?: boolean
+  email?: string
+  message?: string
+  developmentVerificationUrl?: string
+}
+
+export type EmailVerificationResponse = {
+  verified: boolean
+  emailSent: boolean
+  message: string
+  developmentVerificationUrl?: string
+}
 
 export type Account = {
   id: number
@@ -31,6 +46,9 @@ export type Account = {
   lastName: string
   email: string
   twoFactorEnabled: boolean
+  avatarKey: 'signer' | 'scholar' | 'explorer'
+  emailVerified: boolean
+  authProvider: 'LOCAL' | 'GOOGLE' | 'BOTH'
 }
 
 export type TwoFactorSetup = { secret: string; otpAuthUri: string }
@@ -75,4 +93,19 @@ export type SignPrediction = {
     label?: string
     confidence?: number
   }
+}
+
+export type AiHealth = {
+  ready: boolean
+  model: string
+  inputShape: number[]
+  classes: string[]
+  sequenceModel?: string
+  sequenceReady?: boolean
+  capabilities?: {
+    alphabet: boolean
+    numbers: boolean
+    firstSigns: boolean
+  }
+  error?: string | null
 }

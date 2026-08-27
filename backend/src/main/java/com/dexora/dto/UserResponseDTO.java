@@ -1,6 +1,7 @@
 package com.dexora.dto;
 
 import com.dexora.enums.Role;
+import com.dexora.enums.AuthProvider;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -21,4 +22,7 @@ public class UserResponseDTO {
     private Role role;
     private LocalDateTime createdAt;
     private boolean twoFactorEnabled;
+    private String avatarKey;
+    private boolean emailVerified;
+    private AuthProvider authProvider;
 }

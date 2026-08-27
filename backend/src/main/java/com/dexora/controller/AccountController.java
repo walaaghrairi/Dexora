@@ -15,10 +15,14 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Set;
+
 @RestController
 @RequestMapping("/account")
 @RequiredArgsConstructor
 public class AccountController {
+    private static final Set<String> ALLOWED_AVATARS = Set.of("signer", "scholar", "explorer");
+
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final TotpService totpService;
@@ -29,7 +33,11 @@ public class AccountController {
     @PutMapping
     public ResponseEntity<UserResponseDTO> update(@AuthenticationPrincipal UserDetails principal, @RequestBody ProfileUpdateRequest request) {
         User user = user(principal);
-        user.setFirstName(request.getFirstName()); user.setLastName(request.getLastName()); user.setEmail(request.getEmail());
+        if (request.getEmail() != null && !user.getEmail().equalsIgnoreCase(request.getEmail().trim())) {
+            throw new IllegalArgumentException("Le changement d'adresse e-mail nécessite un parcours de vérification séparé.");
+        }
+        user.setFirstName(request.getFirstName()); user.setLastName(request.getLastName());
+        if (request.getAvatarKey() != null && ALLOWED_AVATARS.contains(request.getAvatarKey())) user.setAvatarKey(request.getAvatarKey());
         return ResponseEntity.ok(response(userRepository.save(user)));
     }
 
@@ -53,5 +61,5 @@ public class AccountController {
     }
 
     private User user(UserDetails principal) { return userRepository.findByEmail(principal.getUsername()).orElseThrow(); }
-    private UserResponseDTO response(User user) { return UserResponseDTO.builder().id(user.getId()).firstName(user.getFirstName()).lastName(user.getLastName()).email(user.getEmail()).role(user.getRole()).createdAt(user.getCreatedAt()).twoFactorEnabled(user.isTwoFactorEnabled()).build(); }
+    private UserResponseDTO response(User user) { return UserResponseDTO.builder().id(user.getId()).firstName(user.getFirstName()).lastName(user.getLastName()).email(user.getEmail()).role(user.getRole()).createdAt(user.getCreatedAt()).twoFactorEnabled(user.isTwoFactorEnabled()).avatarKey(user.getAvatarKey() != null && ALLOWED_AVATARS.contains(user.getAvatarKey()) ? user.getAvatarKey() : "signer").emailVerified(user.isEmailVerified()).authProvider(user.getAuthProvider()).build(); }
 }

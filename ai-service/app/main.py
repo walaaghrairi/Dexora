@@ -12,13 +12,22 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, ImageOps
 
-from .hand_preprocessing import HandFrame, HandPreprocessor
+from .hand_preprocessing import HandFrame, HandPreprocessor, normalize_landmarks
 from .landmark_refiner import AsLandmarkRefiner
+from .sequence_recognizer import SequenceRecognizer
 
 BASE_DIR = Path(__file__).resolve().parents[1]
+TUNISIGN_STATIC_MODEL_PATH = BASE_DIR / "models" / "tunisign_static_v3.keras"
+EXTENDED_MODEL_PATH = BASE_DIR / "models" / "cnn_model_keras2.h5"
 TRAINED_MODEL_PATH = BASE_DIR / "models" / "asl_recognition_model_v2.keras"
 LEGACY_MODEL_PATH = BASE_DIR / "models" / "asl_recognition_model.h5"
-DEFAULT_MODEL_PATH = TRAINED_MODEL_PATH if TRAINED_MODEL_PATH.exists() else LEGACY_MODEL_PATH
+DEFAULT_MODEL_PATH = (
+    TUNISIGN_STATIC_MODEL_PATH
+    if TUNISIGN_STATIC_MODEL_PATH.exists()
+    else EXTENDED_MODEL_PATH if EXTENDED_MODEL_PATH.exists()
+    else TRAINED_MODEL_PATH if TRAINED_MODEL_PATH.exists()
+    else LEGACY_MODEL_PATH
+)
 MODEL_PATH = Path(os.getenv("MODEL_PATH", DEFAULT_MODEL_PATH))
 LABELS_PATH = Path(os.getenv("LABELS_PATH", BASE_DIR / "models" / "labels.json"))
 MODEL_CLASS_INDICES_PATH = MODEL_PATH.with_suffix(".classes.json")
@@ -32,14 +41,21 @@ METADATA_PATH = Path(os.getenv(
     MODEL_METADATA_PATH if MODEL_METADATA_PATH.exists() else BASE_DIR / "models" / "model_metadata.json",
 ))
 AS_REFINER_PATH = Path(os.getenv("AS_REFINER_PATH", BASE_DIR / "models" / "as_landmark_classifier.keras"))
+SEQUENCE_MODEL_PATH = Path(os.getenv("SEQUENCE_MODEL_PATH", BASE_DIR / "models" / "tunisign_words_v1.keras"))
 MAX_IMAGE_SIZE = 5 * 1024 * 1024
-INPUT_SIZE = (224, 224)
+MAX_SEQUENCE_SIZE = 24 * 1024 * 1024
+MIN_SEQUENCE_FRAMES = 8
+MAX_SEQUENCE_FRAMES = 64
+DEFAULT_INPUT_SIZE = (224, 224)
 
 model = None
 model_error: str | None = None
 model_lock = Lock()
+input_size = DEFAULT_INPUT_SIZE
+input_channels = 3
 hand_preprocessor = HandPreprocessor()
 as_refiner = AsLandmarkRefiner(AS_REFINER_PATH)
+sequence_recognizer = SequenceRecognizer(SEQUENCE_MODEL_PATH)
 
 
 def load_metadata() -> dict:
@@ -78,7 +94,7 @@ labels = load_labels()
 
 
 def load_recognition_model() -> None:
-    global model, model_error
+    global model, model_error, input_size, input_channels
     try:
         if not MODEL_PATH.exists():
             raise FileNotFoundError(f"Modèle introuvable : {MODEL_PATH}")
@@ -91,6 +107,17 @@ def load_recognition_model() -> None:
             raise ValueError(
                 f"Le modèle possède {output_classes} sorties mais la configuration contient {len(labels)} classes"
             )
+        raw_input_shape = model.input_shape[0] if isinstance(model.input_shape, list) else model.input_shape
+        if not raw_input_shape or len(raw_input_shape) != 4:
+            raise ValueError(f"Forme d'entrée non prise en charge : {raw_input_shape}")
+        height, width, channels = raw_input_shape[-3:]
+        input_size = (
+            int(width or DEFAULT_INPUT_SIZE[0]),
+            int(height or DEFAULT_INPUT_SIZE[1]),
+        )
+        input_channels = int(channels or 3)
+        if input_channels not in {1, 3}:
+            raise ValueError(f"Nombre de canaux non pris en charge : {input_channels}")
         as_refiner.load()
         model_error = None
     except Exception as exc:
@@ -99,10 +126,23 @@ def load_recognition_model() -> None:
 
 
 def prepare_image(image: Image.Image) -> np.ndarray:
-    fitted = ImageOps.fit(image.convert("RGB"), INPUT_SIZE, method=Image.Resampling.LANCZOS)
+    color_mode = "L" if input_channels == 1 else "RGB"
+    fitted = ImageOps.fit(image.convert(color_mode), input_size, method=Image.Resampling.LANCZOS)
     pixels = np.asarray(fitted, dtype=np.float32)
+    if metadata.get("preprocessing") == "binary_otsu":
+        import cv2
+
+        _, pixels = cv2.threshold(
+            pixels.astype(np.uint8),
+            0,
+            255,
+            cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU,
+        )
+        pixels = pixels.astype(np.float32)
     if metadata.get("normalization", "0_1") == "0_1":
         pixels /= 255.0
+    if input_channels == 1:
+        pixels = np.expand_dims(pixels, axis=-1)
     return np.expand_dims(pixels, axis=0)
 
 
@@ -205,6 +245,7 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup() -> None:
     await asyncio.to_thread(load_recognition_model)
+    await asyncio.to_thread(sequence_recognizer.load)
 
 
 @app.on_event("shutdown")
@@ -221,17 +262,29 @@ def health() -> dict:
         warnings.append(f"MediaPipe indisponible : {hand_preprocessor.error}")
     if not as_refiner.available:
         warnings.append("Le correcteur A/S par points de la main n'est pas encore entraîné.")
+    if not sequence_recognizer.available:
+        warnings.append("Le modèle vidéo des expressions n'est pas encore entraîné.")
+    available_labels = [*(labels if model is not None else []), *sequence_recognizer.labels]
+    available_labels = list(dict.fromkeys(available_labels))
+    first_sign_labels = ["BONJOUR", "HI", "THANK_YOU", "I_LOVE_YOU", "MERCI"]
     return {
-        "ready": model is not None,
+        "ready": model is not None or sequence_recognizer.available,
         "model": MODEL_PATH.name,
-        "inputShape": [*INPUT_SIZE, 3],
-        "classes": labels,
-        "classIndices": {label: index for index, label in enumerate(labels)},
+        "sequenceModel": SEQUENCE_MODEL_PATH.name,
+        "sequenceReady": sequence_recognizer.available,
+        "inputShape": [*input_size, input_channels],
+        "classes": available_labels,
+        "classIndices": {label: index for index, label in enumerate(available_labels)},
         "classOrderVerified": bool(metadata.get("classOrderVerified", False)),
         "handTracking": hand_preprocessor.available,
         "dualOrientation": True,
         "asLandmarkRefiner": as_refiner.available,
         "dynamicClasses": metadata.get("dynamicClasses", ["J", "Z"]),
+        "capabilities": {
+            "alphabet": all(label in available_labels for label in list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")),
+            "numbers": all(str(value) in available_labels for value in range(10)),
+            "firstSigns": all(label in available_labels for label in first_sign_labels),
+        },
         "warnings": warnings,
         "error": model_error,
     }
@@ -259,6 +312,70 @@ async def predict(image: UploadFile = File(...)) -> dict:
     return {
         **result,
         "model": MODEL_PATH.stem,
-        "inputShape": [*INPUT_SIZE, 3],
+        "inputShape": [*input_size, input_channels],
         "motionRequired": result["label"] in metadata.get("dynamicClasses", ["J", "Z"]),
+    }
+
+
+def extract_sequence_features(sources: list[Image.Image]) -> tuple[np.ndarray, int]:
+    features: list[np.ndarray] = []
+    detected_count = 0
+    for source in sources:
+        hand = hand_preprocessor.extract(source)
+        if hand.detected and hand.landmarks:
+            features.append(normalize_landmarks(hand.landmarks, hand.handedness))
+            detected_count += 1
+        else:
+            features.append(np.zeros(63, dtype=np.float32))
+    return np.stack(features), detected_count
+
+
+@app.post("/predict-sequence")
+async def predict_sequence(images: list[UploadFile] = File(...)) -> dict:
+    if not sequence_recognizer.available:
+        raise HTTPException(status_code=503, detail=sequence_recognizer.error or "Modèle vidéo indisponible")
+    if not MIN_SEQUENCE_FRAMES <= len(images) <= MAX_SEQUENCE_FRAMES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Envoyez entre {MIN_SEQUENCE_FRAMES} et {MAX_SEQUENCE_FRAMES} images.",
+        )
+
+    sources: list[Image.Image] = []
+    total_size = 0
+    try:
+        for upload in images:
+            if upload.content_type not in {"image/jpeg", "image/png", "image/webp"}:
+                raise HTTPException(status_code=415, detail="Formats acceptés : JPEG, PNG ou WebP")
+            content = await upload.read(MAX_IMAGE_SIZE + 1)
+            total_size += len(content)
+            if len(content) > MAX_IMAGE_SIZE or total_size > MAX_SEQUENCE_SIZE:
+                raise HTTPException(status_code=413, detail="La séquence dépasse la taille autorisée")
+            sources.append(Image.open(BytesIO(content)).convert("RGB"))
+
+        features, detected_count = await asyncio.to_thread(extract_sequence_features, sources)
+        if detected_count < max(3, int(len(sources) * 0.45)):
+            return {
+                "status": "no_hand",
+                "label": "",
+                "confidence": 0.0,
+                "topPredictions": [],
+                "handDetected": False,
+                "model": SEQUENCE_MODEL_PATH.stem,
+                "inputShape": [sequence_recognizer.sequence_length, sequence_recognizer.feature_size],
+                "motionRequired": True,
+            }
+        result = await asyncio.to_thread(sequence_recognizer.predict, features)
+    except HTTPException:
+        raise
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Séquence invalide : {exc}") from exc
+
+    return {
+        **result,
+        "handDetected": True,
+        "model": SEQUENCE_MODEL_PATH.stem,
+        "inputShape": [sequence_recognizer.sequence_length, sequence_recognizer.feature_size],
+        "motionRequired": True,
     }
