@@ -87,6 +87,7 @@ public class AuthenticationServiceImpl implements AuthenticationService {
                     .message("Vérifiez votre adresse e-mail avant de vous connecter.")
                     .build();
         }
+        ensureActive(user);
         return authenticatedResponse(user);
     }
 
@@ -114,6 +115,7 @@ public class AuthenticationServiceImpl implements AuthenticationService {
             }
         }
 
+        ensureActive(user);
         if (!user.isEmailVerified()) {
             user.setEmailVerified(true);
             user = userRepository.save(user);
@@ -125,6 +127,7 @@ public class AuthenticationServiceImpl implements AuthenticationService {
     public AuthenticationResponse verifyTwoFactor(TwoFactorLoginRequest request) {
         User user = userRepository.findByEmail(normalizeEmail(request.getEmail()))
                 .orElseThrow(() -> new BadCredentialsException("Identifiants incorrects."));
+        ensureActive(user);
         if (!user.isEmailVerified()) {
             throw new BadCredentialsException("L'adresse e-mail n'est pas vérifiée.");
         }
@@ -173,6 +176,7 @@ public class AuthenticationServiceImpl implements AuthenticationService {
     }
 
     private AuthenticationResponse authenticatedResponse(User user) {
+        ensureActive(user);
         if (user.isTwoFactorEnabled()) {
             return AuthenticationResponse.builder()
                     .twoFactorRequired(true)
@@ -180,6 +184,12 @@ public class AuthenticationServiceImpl implements AuthenticationService {
                     .build();
         }
         return AuthenticationResponse.builder().token(issueJwt(user)).build();
+    }
+
+    private void ensureActive(User user) {
+        if (!user.isActive()) {
+            throw new BadCredentialsException("Ce compte a été désactivé par un administrateur.");
+        }
     }
 
     private String issueJwt(User user) {

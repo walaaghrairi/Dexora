@@ -2,6 +2,7 @@ export type Category = {
   id: number
   name: string
   description?: string
+  createdAt?: string
 }
 
 export type Course = {
@@ -10,6 +11,7 @@ export type Course = {
   description?: string
   categoryId?: number
   pathId?: number
+  createdAt?: string
 }
 
 export type Sign = {
@@ -21,6 +23,7 @@ export type Sign = {
   difficulty?: 'DEBUTANT' | 'INTERMEDIAIRE' | 'AVANCE'
   modelLabel: string
   courseId?: number
+  createdAt?: string
 }
 
 export type AuthResponse = {
@@ -45,10 +48,29 @@ export type Account = {
   firstName: string
   lastName: string
   email: string
+  role: 'STUDENT' | 'TEACHER' | 'ADMIN'
+  active: boolean
+  createdAt?: string
   twoFactorEnabled: boolean
   avatarKey: 'signer' | 'scholar' | 'explorer'
   emailVerified: boolean
   authProvider: 'LOCAL' | 'GOOGLE' | 'BOTH'
+}
+
+export type AdminDashboardStats = {
+  totalUsers: number
+  activeUsers: number
+  verifiedUsers: number
+  twoFactorUsers: number
+  students: number
+  teachers: number
+  admins: number
+  categories: number
+  courses: number
+  signs: number
+  completedCourses: number
+  awardedBadges: number
+  issuedCertificates: number
 }
 
 export type TwoFactorSetup = { secret: string; otpAuthUri: string }

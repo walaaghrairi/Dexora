@@ -32,10 +32,13 @@ public class CourseServiceImpl implements CourseService {
 
     @Override
     public CourseDTO update(CourseDTO courseDTO) {
-        if (!courseRepository.existsById(courseDTO.getId())) {
-            throw new ResourceNotFoundException("Course not found");
-        }
-        Course course = CourseMapper.toEntity(courseDTO);
+        Course course = courseRepository.findById(courseDTO.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Course not found"));
+        Course changes = CourseMapper.toEntity(courseDTO);
+        course.setTitle(changes.getTitle());
+        course.setDescription(changes.getDescription());
+        course.setCategory(changes.getCategory());
+        course.setPath(changes.getPath());
         return CourseMapper.toDTO(courseRepository.save(course));
     }
 

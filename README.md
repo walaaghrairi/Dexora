@@ -1,6 +1,6 @@
-# Dexora
+# TuniSign
 
-Monorepo scaffold for the Dexora project.
+Plateforme d'apprentissage assisté de la langue des signes tunisienne.
 
 ## Structure
 
@@ -9,6 +9,10 @@ Monorepo scaffold for the Dexora project.
 - `ai-service/` — FastAPI
 - `database/` — PostgreSQL assets (to be added later)
 - `docs/` — Project documentation
+
+## Qualité et sécurité
+
+Les tests frontend, backend, IA et end-to-end sont exécutés par GitHub Actions. Les commandes, le mapping OWASP Top 10:2025 et les limites restantes sont documentés dans [`docs/SECURITY_TESTING.md`](docs/SECURITY_TESTING.md).
 
 ## Vérification e-mail et connexion Google
 
@@ -51,3 +55,17 @@ $env:EMAIL_VERIFICATION_EXPOSE_DEV_LINK="false"
 ```
 
 Ne placez jamais le mot de passe SMTP ou un secret dans Git. Redémarrez le frontend et le backend après toute modification des variables d'environnement.
+
+## Activer le dashboard administrateur
+
+Créez d'abord le compte normalement dans TuniSign, puis démarrez une fois le backend avec son adresse e-mail dans `ADMIN_EMAIL` :
+
+```powershell
+cd backend
+$env:ADMIN_EMAIL="votre-compte@example.com"
+mvn spring-boot:run
+```
+
+Le rôle `ADMIN` est enregistré dans PostgreSQL. Déconnectez-vous puis reconnectez-vous afin de recevoir un nouveau JWT contenant ce rôle. Le bouton **Administration** apparaîtra alors dans la navigation. Le dashboard permet de consulter les statistiques, gérer les rôles et l'état des comptes, ainsi que créer, modifier ou supprimer les catégories, cours et signes.
+
+Pour des raisons de sécurité, un administrateur ne peut pas désactiver son propre compte ni retirer le dernier rôle administrateur.

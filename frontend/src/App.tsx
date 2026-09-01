@@ -3,10 +3,13 @@ import type { CSSProperties, FormEvent } from 'react'
 import { api } from './services/api'
 import type { Account, AiHealth, AuthResponse, Category, CertificateCredential, Course, Sign, SignPrediction, TwoFactorSetup } from './types/api'
 import { GoogleSignInButton } from './components/GoogleSignInButton'
+import { AdminDashboard } from './components/AdminDashboard'
 import tunisignLogo from './assets/tunisign-sina-logo.png'
+import aslAlphabetLessonVideo from './assets/asl-alphabet-lesson.mp4'
 import { translate, type Language, type TranslationKey } from './i18n'
 
-type Page = 'home' | 'catalogue' | 'dashboard' | 'rewards' | 'settings' | 'auth' | 'practice' | 'twoFactor' | 'emailPending' | 'verifyEmail' | 'verifyCertificate'
+type Page = 'home' | 'catalogue' | 'dashboard' | 'rewards' | 'admin' | 'settings' | 'auth' | 'practice' | 'twoFactor' | 'emailPending' | 'verifyEmail' | 'verifyCertificate'
+const AUTHENTICATED_PAGES = new Set<Page>(['catalogue', 'dashboard', 'rewards', 'admin', 'settings', 'practice'])
 type PracticeStatus = 'idle' | 'analyzing' | 'ready' | 'no-hand'
 type PracticeMode = 'learn' | 'practice' | 'quiz'
 type RewardType = 'badge' | 'certificate'
@@ -18,6 +21,7 @@ const STABLE_FRAME_COUNT = 2
 const ACCEPTANCE_CONFIDENCE = 0.4
 const MAX_CAPTURE_EDGE = 640
 const COURSE_HELP_LIMIT = 4
+const PASSWORD_PATTERN = String.raw`(?=\S+$)(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,128}`
 const SEQUENCE_LABELS = new Set(['BONJOUR', 'HI', 'THANK_YOU', 'I_LOVE_YOU', 'MERCI'])
 const AVATAR_OPTIONS: Array<{ key: Account['avatarKey']; emoji: string }> = [
   { key: 'signer', emoji: '🤟' },
@@ -110,12 +114,15 @@ function App() {
   const [categories, setCategories] = useState<Category[]>([])
   const [courses, setCourses] = useState<Course[]>([])
   const [signs, setSigns] = useState<Sign[]>([])
-  const [usesDemoData, setUsesDemoData] = useState(false)
+  const [contentRevision, setContentRevision] = useState(0)
   const [aiHealth, setAiHealth] = useState<AiHealth | null>(null)
   const [loading, setLoading] = useState(true)
   const [notice, setNotice] = useState('')
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null)
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null)
+  const [lessonVideoOpen, setLessonVideoOpen] = useState(false)
+  const [lessonVideoWatched, setLessonVideoWatched] = useState(false)
+  const [lessonVideoProgress, setLessonVideoProgress] = useState(0)
   const [isRegistering, setIsRegistering] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(localStorage.getItem('tunisign_token')))
   const [account, setAccount] = useState<Account | null>(null)
@@ -233,28 +240,35 @@ function App() {
           setCategories(demoCategories)
           setCourses(demoCourses)
           setSigns(demoSigns)
-          setUsesDemoData(true)
           return
         }
 
         setCategories(categoriesResult.value)
         setCourses(coursesResult.value)
         setSigns(signsResult.status === 'fulfilled' ? signsResult.value : [])
-        setUsesDemoData(false)
       })
       .catch(() => {
         setCategories(demoCategories)
         setCourses(demoCourses)
         setSigns(demoSigns)
-        setUsesDemoData(true)
       })
       .finally(() => setLoading(false))
-  }, [isAuthenticated])
+  }, [isAuthenticated, contentRevision])
 
   useEffect(() => {
     if (!isAuthenticated) { setAccount(null); return }
-    api.account().then(setAccount).catch(() => setNotice(translate(language, 'notice.profileLoad')))
+    api.account().then(setAccount).catch(() => {
+      localStorage.removeItem('tunisign_token')
+      setIsAuthenticated(false)
+      setAccount(null)
+      setPage('home')
+      setNotice(translate(language, 'notice.profileLoad'))
+    })
   }, [isAuthenticated, language])
+
+  useEffect(() => {
+    if (page === 'admin' && account && account.role !== 'ADMIN') setPage('dashboard')
+  }, [account, page])
 
   useEffect(() => {
     const storageKey = `tunisign_badges_${account?.id ?? 'guest'}`
@@ -465,8 +479,25 @@ function App() {
     return courseSigns.every((sign) => supportedLabels.has(sign.modelLabel.trim().toLocaleLowerCase()))
   }
 
+  function isAlphabetCourse(course: Course) {
+    const courseLabels = signs
+      .filter((sign) => sign.courseId === course.id && /^[A-Z]$/i.test(sign.modelLabel.trim()))
+      .map((sign) => sign.modelLabel.trim().toUpperCase())
+    return /alphabet|a\s*[–-]\s*z/i.test(course.title) || new Set(courseLabels).size >= 26
+  }
+
+  function alphabetVideoStorageKey() {
+    return `tunisign_alphabet_video_watched_${account?.id ?? 'guest'}`
+  }
+
   function navigate(nextPage: Page) {
     setNotice('')
+    if (!isAuthenticated && !localStorage.getItem('tunisign_token') && AUTHENTICATED_PAGES.has(nextPage)) {
+      setIsRegistering(false)
+      setPage('auth')
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
     if (window.location.pathname.startsWith('/verify-certificate/') || window.location.pathname === '/verify-email') {
       window.history.pushState({}, '', '/')
     }
@@ -514,7 +545,24 @@ function App() {
     setShowAsConfusionHint(false)
     setPracticeStatus('idle')
     setPrediction(null)
+    const showAlphabetVideo = isAlphabetCourse(course)
+    const videoAlreadyWatched = showAlphabetVideo && localStorage.getItem(alphabetVideoStorageKey()) === 'true'
+    setLessonVideoOpen(showAlphabetVideo)
+    setLessonVideoWatched(videoAlreadyWatched)
+    setLessonVideoProgress(videoAlreadyWatched ? 100 : 0)
     navigate('practice')
+  }
+
+  function completeLessonVideo() {
+    localStorage.setItem(alphabetVideoStorageKey(), 'true')
+    setLessonVideoWatched(true)
+    setLessonVideoProgress(100)
+  }
+
+  function continueAfterLessonVideo() {
+    if (!lessonVideoWatched) return
+    setLessonVideoOpen(false)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   function beginPractice() {
@@ -821,12 +869,13 @@ function App() {
           <span className="brand-mark"><img src={tunisignLogo} alt="" /></span>
           <span className="brand-title"><strong>TuniSign</strong><small>{t('brand.subtitle')}</small></span>
         </button>
-        <nav aria-label="Navigation principale">
+        {isAuthenticated && account && <nav aria-label="Navigation principale">
           <button className={page === 'home' ? 'active' : ''} onClick={() => navigate('home')}>{t('nav.home')}</button>
           <button className={page === 'catalogue' || page === 'practice' ? 'active' : ''} onClick={() => navigate('catalogue')}>{t('nav.learn')}</button>
           <button className={page === 'dashboard' || page === 'settings' ? 'active' : ''} onClick={() => navigate('dashboard')}>{t('nav.space')}</button>
           <button className={page === 'rewards' ? 'active' : ''} onClick={() => navigate('rewards')}>{t('nav.rewards')}</button>
-        </nav>
+          {account.role === 'ADMIN' && <button className={page === 'admin' ? 'active' : ''} onClick={() => navigate('admin')}>{t('nav.admin')}</button>}
+        </nav>}
         <div className="topbar-actions">
           <label className="language-picker" aria-label="Language"><span>🌐</span><select value={language} onChange={(event) => setLanguage(event.target.value as Language)}><option value="fr">FR</option><option value="en">EN</option><option value="ar">عربي</option></select></label>
           <button className="theme-button" onClick={toggleTheme} aria-label={darkMode ? t('theme.light') : t('theme.dark')}>{darkMode ? '☀️' : '🌙'}</button>
@@ -838,7 +887,6 @@ function App() {
         </div>
       </header>
 
-      {usesDemoData && page !== 'verifyCertificate' && <div className="status-banner">{t('demo.banner')}</div>}
       {notice && <div className="notice">{notice}</div>}
 
       {page === 'verifyCertificate' && (
@@ -944,7 +992,35 @@ function App() {
       {page === 'practice' && selectedCourse && (
         <main className="practice-page">
           <button className="back-button" onClick={() => navigate('catalogue')}>{t('practice.back')}</button>
-          <section className="practice-layout">
+          {lessonVideoOpen ? <section className="lesson-video-layout">
+            <article className="lesson-video-card">
+              <header><div><p className="eyebrow">{t('practice.videoEyebrow')}</p><h1>{t('practice.videoTitle')}</h1></div><span className={lessonVideoWatched ? 'video-status watched' : 'video-status'}>{lessonVideoWatched ? `✓ ${t('practice.videoWatched')}` : '5:10'}</span></header>
+              <p className="lesson-video-copy">{t('practice.videoCopy')}</p>
+              <div className="lesson-video-frame">
+                <video
+                  controls
+                  playsInline
+                  preload="metadata"
+                  poster=""
+                  onTimeUpdate={(event) => {
+                    const duration = event.currentTarget.duration
+                    if (Number.isFinite(duration) && duration > 0 && !lessonVideoWatched) {
+                      setLessonVideoProgress(Math.min(99, Math.round((event.currentTarget.currentTime / duration) * 100)))
+                    }
+                  }}
+                  onEnded={completeLessonVideo}
+                >
+                  <source src={aslAlphabetLessonVideo} type="video/mp4" />
+                  {t('practice.videoUnsupported')}
+                </video>
+              </div>
+              <div className="lesson-video-progress"><span style={{ width: `${lessonVideoProgress}%` }} /></div>
+              <div className="lesson-video-footer"><p>{lessonVideoWatched ? t('practice.videoComplete') : t('practice.videoRequired', { progress: lessonVideoProgress })}</p><button className="primary-button compact" disabled={!lessonVideoWatched} onClick={continueAfterLessonVideo}>{t('practice.videoStartTasks')} →</button></div>
+            </article>
+            <aside className="lesson-video-side">
+              <span className="video-side-icon">🎓</span><p className="eyebrow">{t('practice.videoSequence')}</p><h2>{t('practice.videoSideTitle')}</h2><ol><li><b>1</b>{t('practice.videoStepWatch')}</li><li><b>2</b>{t('practice.videoStepObserve')}</li><li><b>3</b>{t('practice.videoStepPractice')}</li></ol><div className="tip-card"><span>💡</span><p>{t('practice.videoTip')}</p></div>
+            </aside>
+          </section> : <section className="practice-layout">
             <div className="practice-stage">
               <div className="stage-header"><span>{t('practice.current')}</span><strong>{Math.min(selectedCourseEarned + 1, badgeTotal(selectedCourse))} / {badgeTotal(selectedCourse)}</strong></div>
               <div className="practice-progress"><span style={{ width: `${Math.max(8, (selectedCourseEarned / badgeTotal(selectedCourse)) * 100)}%` }} /></div>
@@ -988,7 +1064,7 @@ function App() {
               <div className="practice-side-summary"><div className="xp-badge">⚡ +20 XP</div><div className="help-counter">💡 {t('practice.helpsRemaining', { count: remainingHelpCredits })}</div></div>
               {practiceMode === 'learn' ? <div className="lesson-steps"><h2>{t('practice.methodTitle')}</h2><p><b>1</b>{t('practice.methodObserve')}</p><p><b>2</b>{t('practice.methodRepeat')}</p><p><b>3</b>{t('practice.methodTest')}</p><div className="tip-card"><span>💡</span><p>{t('practice.helpExplanation')}</p></div></div> : practiceStatus === 'ready' && prediction ? <><div className="score-ring" style={{ '--score': predictionScore } as CSSProperties}><strong>{predictionScore}%</strong><small>{t('practice.confidence')}</small></div><div className="analysis-checks"><p>{t('practice.predicted')} : <b>{prediction.label}</b></p>{expectedLabel && <p>{t('practice.expected')} : <b>{expectedLabel}</b></p>}{prediction.orientation && <p>{t('practice.orientationUsed')} : <b>{prediction.orientation === 'mirrored' ? t('practice.orientationMirrored') : t('practice.orientationOriginal')}</b></p>}{prediction.landmarkRefinement?.applied && <p>{t('practice.landmarkCorrection')} : <b>A/S</b></p>}<p className={predictionAccepted ? 'prediction-ok' : 'prediction-retry'}>{predictionAccepted ? t('practice.correct') : t('practice.incorrect')}</p></div>{predictionAccepted ? <button className="primary-button compact" onClick={practiceMode === 'quiz' ? advanceFinalTest : finishPracticeStep}>{practiceMode === 'quiz' ? isLastFinalTestSign ? t('practice.validateCourse') : t('practice.nextTestLetter') : isLastPracticeLetter ? t('practice.startFinalTest') : t('practice.finish')}</button> : <p className="retry-advice">{t('practice.retryAdvice')}</p>}</> : <><h2>{practiceMode === 'quiz' ? t('practice.finalTestTitle') : t('practice.goal')}</h2><p>{practiceMode === 'quiz' ? t('practice.finalTestGoal') : t('practice.goalCopy')}</p><div className="tip-card"><span>💡</span><p>{t('practice.tip')}</p></div></>}
             </aside>
-          </section>
+          </section>}
           {gestureReminderOpen && targetPracticeSign && <div className="gesture-reminder-overlay" role="dialog" aria-modal="true" aria-label={t('practice.reminderTitle')}>
             <section className="gesture-reminder-card"><p className="eyebrow">{t('practice.reminderEyebrow')} · {t('practice.reminderCycle', { current: reminderCycles })}</p><h2>{t('practice.reminderTitle')}</h2><p>{t('practice.reminderCopy', { count: 6 })}</p><div className="reminder-gesture"><div className="reference-letter">{isSequenceModelLabel(targetPracticeSign.modelLabel) ? '🎬' : targetPracticeSign.modelLabel}</div>{targetPracticeSign.imageUrl && <img src={targetPracticeSign.imageUrl} alt={t('practice.referenceAlt', { label: targetPracticeSign.modelLabel })} onError={(event) => event.currentTarget.remove()} />}</div><strong>{t('practice.reminderLabel', { label: targetPracticeSign.word || targetPracticeSign.modelLabel })}</strong>{showAsConfusionHint && <div className="confusion-hint modal-hint"><span>👀</span><p>{t('practice.asConfusionHint')}</p></div>}<button className="primary-button" onClick={resumeAfterReminder}>{reminderCycles >= 3 ? t('practice.deferAndContinue', { label: targetPracticeSign.modelLabel }) : t('practice.resume')}</button></section>
           </div>}
@@ -1057,13 +1133,17 @@ function App() {
         </main>
       )}
 
+      {page === 'admin' && account?.role === 'ADMIN' && (
+        <AdminDashboard language={language} currentUserId={account.id} onContentChanged={() => setContentRevision((current) => current + 1)} />
+      )}
+
       {page === 'settings' && (
         <main className="content-page settings-page">
           <button className="back-button" onClick={() => navigate('dashboard')}>{t('settings.back')}</button>
           <div className="section-heading"><div><p className="eyebrow">{t('settings.eyebrow')}</p><h2>{t('settings.title')}</h2></div>{account && <UserAvatar avatarKey={selectedAvatar} initials={`${account.firstName.slice(0, 1)}${account.lastName.slice(0, 1)}`} className="account-avatar" />}</div>
           {account ? <div className="account-grid">
               <form className="account-card profile-account-card" onSubmit={updateProfile}><h3>{t('settings.personal')}</h3><p>{t('settings.personalCopy')}</p><fieldset className="avatar-picker"><legend>{t('settings.avatarTitle')}</legend><p>{t('settings.avatarCopy')}</p><div className="avatar-options">{AVATAR_OPTIONS.map((avatar) => <label className={`avatar-option ${selectedAvatar === avatar.key ? 'selected' : ''}`} key={avatar.key}><input type="radio" name="avatarKey" value={avatar.key} checked={selectedAvatar === avatar.key} onChange={() => setSelectedAvatar(avatar.key)} /><UserAvatar avatarKey={avatar.key} initials={`${account.firstName.slice(0, 1)}${account.lastName.slice(0, 1)}`} className="avatar-choice-preview" /><span>{t(`settings.avatar${avatar.key.charAt(0).toUpperCase()}${avatar.key.slice(1)}` as TranslationKey)}</span><i>{selectedAvatar === avatar.key ? '✓' : ''}</i></label>)}</div></fieldset><div className="form-row"><label>{t('settings.firstName')}<input name="firstName" defaultValue={account.firstName} required /></label><label>{t('settings.lastName')}<input name="lastName" defaultValue={account.lastName} required /></label></div><label>{t('settings.email')}<input name="email" type="email" defaultValue={account.email} readOnly required /></label><div className="email-status verified"><span>✓</span><div><b>{t('settings.emailVerified')}</b><small>{account.authProvider === 'GOOGLE' ? t('settings.googleAccount') : t('settings.emailLocked')}</small></div></div><button className="primary-button compact" type="submit">{t('settings.save')}</button></form>
-              {account.authProvider !== 'GOOGLE' ? <form className="account-card" onSubmit={updatePassword}><h3>{t('settings.password')}</h3><p>{t('settings.passwordCopy')}</p><label>{t('settings.currentPassword')}<input name="currentPassword" type="password" required /></label><label>{t('settings.newPassword')}<input name="newPassword" type="password" minLength={8} required /></label><button className="primary-button compact" type="submit">{t('settings.changePassword')}</button></form> : <article className="account-card google-account-card"><span className="google-account-icon">G</span><div><h3>{t('settings.googleLinked')}</h3><p>{t('settings.googleLinkedCopy')}</p></div></article>}
+              {account.authProvider !== 'GOOGLE' ? <form className="account-card" onSubmit={updatePassword}><h3>{t('settings.password')}</h3><p>{t('settings.passwordCopy')}</p><label>{t('settings.currentPassword')}<input name="currentPassword" type="password" autoComplete="current-password" required /></label><label>{t('settings.newPassword')}<input name="newPassword" type="password" autoComplete="new-password" minLength={8} maxLength={128} pattern={PASSWORD_PATTERN} title={t('auth.passwordRequirements')} required /></label><small className="password-requirements">{t('auth.passwordRequirements')}</small><button className="primary-button compact" type="submit">{t('settings.changePassword')}</button></form> : <article className="account-card google-account-card"><span className="google-account-icon">G</span><div><h3>{t('settings.googleLinked')}</h3><p>{t('settings.googleLinkedCopy')}</p></div></article>}
               <article className="account-card two-factor-card"><div className="two-factor-title"><span>🔐</span><div><h3>Google Authenticator</h3><p>{account.twoFactorEnabled ? t('settings.twoFactorOn') : t('settings.twoFactorOff')}</p></div></div>{!account.twoFactorEnabled && !twoFactorSetup && <button className="primary-button compact" onClick={setupTwoFactor}>{t('settings.configure2fa')}</button>}{twoFactorSetup && <form className="two-factor-setup" onSubmit={enableTwoFactor}><p>{t('settings.manualKey')}</p><code>{twoFactorSetup.secret}</code><small>{t('settings.account')} : {account.email} · {t('settings.timeBased')}</small><label>{t('settings.sixDigit')}<input name="code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} placeholder="123456" required /></label><button className="primary-button compact" type="submit">{t('settings.enable2fa')}</button></form>}</article>
             </div>
           : <p>{t('settings.loading')}</p>}
@@ -1078,7 +1158,8 @@ function App() {
             <form onSubmit={submitAuth}>
               {isRegistering && <div className="form-row"><label>{t('settings.firstName')}<input required name="firstName" /></label><label>{t('settings.lastName')}<input required name="lastName" /></label></div>}
               <label>{t('auth.email')}<input required type="email" name="email" placeholder="nom@exemple.com" /></label>
-              <label>{t('auth.password')}<input required minLength={8} type="password" name="password" placeholder={t('auth.passwordPlaceholder')} /></label>
+              <label>{t('auth.password')}<input required minLength={8} maxLength={128} pattern={isRegistering ? PASSWORD_PATTERN : undefined} type="password" name="password" autoComplete={isRegistering ? 'new-password' : 'current-password'} placeholder={t('auth.passwordPlaceholder')} title={isRegistering ? t('auth.passwordRequirements') : undefined} /></label>
+              {isRegistering && <small className="password-requirements">{t('auth.passwordRequirements')}</small>}
               <button className="primary-button" type="submit">{isRegistering ? t('auth.create') : t('auth.connection')}</button>
             </form>
             <div className="auth-divider"><span>{t('auth.or')}</span></div>

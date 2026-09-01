@@ -42,6 +42,14 @@ METADATA_PATH = Path(os.getenv(
 ))
 AS_REFINER_PATH = Path(os.getenv("AS_REFINER_PATH", BASE_DIR / "models" / "as_landmark_classifier.keras"))
 SEQUENCE_MODEL_PATH = Path(os.getenv("SEQUENCE_MODEL_PATH", BASE_DIR / "models" / "tunisign_words_v1.keras"))
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173",
+    ).split(",")
+    if origin.strip()
+]
 MAX_IMAGE_SIZE = 5 * 1024 * 1024
 MAX_SEQUENCE_SIZE = 24 * 1024 * 1024
 MIN_SEQUENCE_FRAMES = 8
@@ -235,10 +243,10 @@ def predict_variants(source: Image.Image) -> dict:
 app = FastAPI(title="TuniSign AI Service", version="2.0.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_credentials=True,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["*"],
+    allow_headers=["Content-Type"],
 )
 
 

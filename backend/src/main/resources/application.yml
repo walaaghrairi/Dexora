@@ -1,17 +1,18 @@
 spring:
   application:
-    name: dexora
+    name: tunisign
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/dexora_db
-    username: postgres
-    password: 123
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/dexora_db}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:}
 
   jpa:
     hibernate:
       ddl-auto: update
 
-    show-sql: true
+    show-sql: false
+    open-in-view: false
 
     properties:
       hibernate:
@@ -30,23 +31,48 @@ spring:
             enable: true
             required: true
 
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
+
 server:
   port: 8081
-  logging:
-    level:
-      org.hibernate.SQL: DEBUG
-      org.hibernate.tool.schema: DEBUG
-      org.springframework.orm.jpa: DEBUG
+  error:
+    include-message: never
+    include-stacktrace: never
+  tomcat:
+    max-http-form-post-size: 1MB
+    max-swallow-size: 6MB
+
+logging:
+  level:
+    org.hibernate.SQL: INFO
+    org.springframework.security: INFO
+
+springdoc:
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:true}
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:true}
 
 application:
   frontend-base-url: ${FRONTEND_BASE_URL:http://localhost:5173}
   certificate:
     public-base-url: ${CERTIFICATE_PUBLIC_BASE_URL:http://localhost:5173}
   security:
+    admin-email: ${ADMIN_EMAIL:}
     google:
       client-id: ${GOOGLE_CLIENT_ID:}
     email-verification:
       expiration-minutes: ${EMAIL_VERIFICATION_EXPIRATION_MINUTES:30}
-      expose-development-link: ${EMAIL_VERIFICATION_EXPOSE_DEV_LINK:true}
+      expose-development-link: ${EMAIL_VERIFICATION_EXPOSE_DEV_LINK:false}
+    cors:
+      allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
+    rate-limit:
+      requests: ${AUTH_RATE_LIMIT_REQUESTS:10}
+      window-seconds: ${AUTH_RATE_LIMIT_WINDOW_SECONDS:60}
+    swagger-public: ${SWAGGER_PUBLIC:true}
     jwt:
-      secret-key: 404E635266556A586E3272357538782F413F4428472B4B6250655368566D5971
+      secret-key: ${JWT_SECRET_KEY:}
+      expiration-ms: ${JWT_EXPIRATION_MS:1440000}

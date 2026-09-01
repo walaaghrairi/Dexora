@@ -32,10 +32,10 @@ public class CategoryServiceImpl implements CategoryService {
 
     @Override
     public CategoryDTO update(CategoryDTO categoryDTO) {
-        if (!categoryRepository.existsById(categoryDTO.getId())) {
-            throw new ResourceNotFoundException("Category not found");
-        }
-        Category category = CategoryMapper.toEntity(categoryDTO);
+        Category category = categoryRepository.findById(categoryDTO.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Category not found"));
+        category.setName(categoryDTO.getName());
+        category.setDescription(categoryDTO.getDescription());
         return CategoryMapper.toDTO(categoryRepository.save(category));
     }
 

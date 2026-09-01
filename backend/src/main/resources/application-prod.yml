@@ -1,0 +1,22 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  mail:
+    properties:
+      mail:
+        debug: false
+
+application:
+  security:
+    swagger-public: false
+    email-verification:
+      expose-development-link: false
+    jwt:
+      require-explicit-secret: true
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

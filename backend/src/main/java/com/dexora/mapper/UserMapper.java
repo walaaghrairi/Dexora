@@ -35,6 +35,7 @@ public class UserMapper {
                 .twoFactorEnabled(entity.isTwoFactorEnabled())
                 .avatarKey(entity.getAvatarKey())
                 .emailVerified(entity.isEmailVerified())
+                .active(entity.isActive())
                 .authProvider(entity.getAuthProvider())
                 .build();
     }

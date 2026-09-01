@@ -32,10 +32,16 @@ public class SignServiceImpl implements SignService {
 
     @Override
     public SignDTO update(SignDTO signDTO) {
-        if (!signRepository.existsById(signDTO.getId())) {
-            throw new ResourceNotFoundException("Sign not found");
-        }
-        Sign sign = SignMapper.toEntity(signDTO);
+        Sign sign = signRepository.findById(signDTO.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Sign not found"));
+        Sign changes = SignMapper.toEntity(signDTO);
+        sign.setWord(changes.getWord());
+        sign.setDescription(changes.getDescription());
+        sign.setImageUrl(changes.getImageUrl());
+        sign.setVideoUrl(changes.getVideoUrl());
+        sign.setDifficulty(changes.getDifficulty());
+        sign.setModelLabel(changes.getModelLabel());
+        sign.setCourse(changes.getCourse());
         return SignMapper.toDTO(signRepository.save(sign));
     }
 

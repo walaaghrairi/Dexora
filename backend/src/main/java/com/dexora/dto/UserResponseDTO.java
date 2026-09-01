@@ -24,5 +24,6 @@ public class UserResponseDTO {
     private boolean twoFactorEnabled;
     private String avatarKey;
     private boolean emailVerified;
+    private boolean active;
     private AuthProvider authProvider;
 }

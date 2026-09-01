@@ -76,6 +76,9 @@ public class User {
     @Column(nullable = false, columnDefinition = "boolean default true")
     private boolean emailVerified = true;
 
+    @Column(nullable = false, columnDefinition = "boolean default true")
+    private boolean active = true;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16, columnDefinition = "varchar(16) default 'LOCAL'")
     private AuthProvider authProvider = AuthProvider.LOCAL;
